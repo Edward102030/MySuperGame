@@ -1,93 +1,295 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-  <meta name="theme-color" content="#0a0d14">
-  <title>POKESIM NZ WORKSPACE</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>PokeTCGNZ</title>
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <h1>POKESIM NZ WORKSPACE</h1>
-    <div class="stats">
-      <span>Wallet: <b id="wallet-stat">$0.00</b></span>
-      <span>Assets: <b id="asset-stat">$0.00</b></span>
-      <span class="save-tools"><button id="export-btn">Export</button><button id="import-btn">Import</button></span>
+
+  <!-- ============ HEADER ============ -->
+  <header id="app-header">
+    <div class="header-left">
+      <span class="brand-mark">◈</span>
+      <h1>PokeTCGNZ</h1>
+    </div>
+    <div class="header-right">
+      <div class="stat-pill wallet-pill">
+        <span class="stat-label">Wallet</span>
+        <span class="stat-value" id="hdr-wallet">$0.00</span>
+      </div>
+      <div class="stat-pill assets-pill">
+        <span class="stat-label">Assets</span>
+        <span class="stat-value" id="hdr-assets">$0.00</span>
+      </div>
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Workspace views">
-    <button class="tab active" data-view="league">🏆 League</button>
-    <button class="tab" data-view="packs">🛒 Packs</button>
-    <button class="tab" data-view="binder">🎴 Binder</button>
-    <button class="tab" data-view="market">⚖️ Market</button>
-  </nav>
+  <!-- ============ SYSTEM LOG ============ -->
+  <div id="log" aria-live="polite"></div>
 
-  <main>
-    <section id="log" class="terminal" aria-live="polite"></section>
+  <!-- ============ MAIN SPLIT FRAMEWORK ============ -->
+  <div id="app-shell">
 
-    <section id="league" class="view active">
-      <div id="tournament-menu" class="league-list"></div>
+    <!-- LEFT NAV -->
+    <nav id="side-nav">
+      <button class="nav-btn active" data-view="home" id="nav-home">
+        <span class="nav-icon">📊</span><span class="nav-text">Home</span>
+      </button>
+      <button class="nav-btn" data-view="league" id="nav-league">
+        <span class="nav-icon">🏆</span><span class="nav-text">League</span>
+      </button>
+      <button class="nav-btn" data-view="packs" id="nav-packs">
+        <span class="nav-icon">🛒</span><span class="nav-text">Packs</span>
+      </button>
+      <button class="nav-btn" data-view="binder" id="nav-binder">
+        <span class="nav-icon">🎴</span><span class="nav-text">Binder</span>
+      </button>
+      <button class="nav-btn disabled-nav" data-view="multiplayer" id="nav-multiplayer">
+        <span class="nav-icon">🤝</span><span class="nav-text">Multiplayer</span>
+        <span class="construction-badge">UNDER CONSTRUCTION</span>
+      </button>
+      <button class="nav-btn" data-view="market" id="nav-market">
+        <span class="nav-icon">⚖️</span><span class="nav-text">Market</span>
+      </button>
+    </nav>
 
-      <div id="arena" class="arena hidden">
-        <div class="opponent-zone">
-          <div id="o-active" class="mat-zone active-zone">Opponent Active</div>
-          <div id="o-hand" class="mat-zone">Opponent Hand<br><b>7</b></div>
-          <div id="o-prizes" class="mat-zone prize-zone">Opponent Prizes<br><b>6</b></div>
-        </div>
+    <!-- RIGHT CONTENT PANE -->
+    <main id="content-pane">
 
-        <div class="tcg-board">
-          <aside class="side-column">
-            <div id="p-prizes" class="mat-zone prize-zone">Prize Cards<br><b>6</b></div>
-          </aside>
-          <section class="center-column">
-            <div id="p-active" class="mat-zone active-zone">Active Pokémon</div>
-            <div class="bench-grid">
-              <div id="b1" class="mat-zone bench-slot">Bench 1</div>
-              <div id="b2" class="mat-zone bench-slot">Bench 2</div>
-              <div id="b3" class="mat-zone bench-slot">Bench 3</div>
-              <div id="b4" class="mat-zone bench-slot">Bench 4</div>
-              <div id="b5" class="mat-zone bench-slot">Bench 5</div>
+      <!-- ===== VIEW 1: HOME ===== -->
+      <section class="view active-view" id="view-home">
+        <button class="settings-gear" id="btn-settings" title="Account Settings">⚙️</button>
+
+        <div class="home-grid">
+          <div class="welcome-block">
+            <h2 id="welcome-text">Welcome back, Trainer.</h2>
+            <p class="welcome-sub">Your collection journey continues.</p>
+          </div>
+
+          <div class="profile-card glass-panel">
+            <h3 class="panel-title">Trainer Profile</h3>
+            <div class="profile-stats-grid">
+              <div class="profile-stat">
+                <span class="profile-stat-int" id="stat-wl">0&nbsp;–&nbsp;0</span>
+                <span class="profile-stat-label">Wins – Losses</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat-int" id="stat-streak">0</span>
+                <span class="profile-stat-label">Highest Win Streak</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat-int" id="stat-packs">0</span>
+                <span class="profile-stat-label">Packs Opened</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat-int" id="stat-mvc">—</span>
+                <span class="profile-stat-label">Most Valuable Card</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat-int" id="stat-earnings">$0.00</span>
+                <span class="profile-stat-label">Total Prize Money (NZD)</span>
+              </div>
+              <div class="profile-stat">
+                <span class="profile-stat-int" id="stat-sets">0/0</span>
+                <span class="profile-stat-label">Set Completion</span>
+              </div>
             </div>
-          </section>
-          <aside class="side-column">
-            <div id="deck-pile" class="mat-zone deck-zone">Deck Pile</div>
-            <div id="discard-pile" class="mat-zone discard-zone">Discard Pile</div>
-          </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== VIEW 2: LEAGUE ===== -->
+      <section class="view" id="view-league">
+
+        <div id="league-lobby">
+          <div class="format-toggle" id="format-toggle">
+            <button class="format-btn active" data-format="standard">Standard</button>
+            <button class="format-btn" data-format="expanded">Expanded</button>
+          </div>
+
+          <div class="lobby-grid">
+            <div class="lobby-main">
+
+              <h3 class="lobby-section-title">Quick Play</h3>
+              <div class="event-grid">
+                <div class="event-card glass-panel" data-event="ranked">
+                  <div class="rank-badge">
+                    <span class="rank-icon" id="rank-icon">🔴</span>
+                    <div class="rank-text">
+                      <span class="rank-name" id="rank-name">Poké Ball I</span>
+                      <span class="rank-points" id="rank-points">0 RP</span>
+                    </div>
+                  </div>
+                  <h4>Ranked Ladder Match</h4>
+                  <p class="event-desc">Best of 1 · Climb the NZ regional ladder.</p>
+                  <p class="event-fee">Entry: Free</p>
+                  <button class="btn-primary queue-btn" data-event="ranked">Queue Up</button>
+                </div>
+                <div class="event-card glass-panel" data-event="casual">
+                  <h4>Casual Play Arena</h4>
+                  <p class="event-desc">Best of 1 · No stakes, just battle practice.</p>
+                  <p class="event-fee">Entry: Free</p>
+                  <button class="btn-primary queue-btn" data-event="casual">Queue Up</button>
+                </div>
+              </div>
+
+              <h3 class="lobby-section-title">Live Tournaments</h3>
+              <div id="tournament-list" class="tournament-list"></div>
+            </div>
+
+            <div class="deck-frame glass-panel">
+              <h3 class="panel-title">Active Deck</h3>
+              <div class="deck-thumb-row">
+                <div class="deck-thumb">🎴</div>
+                <div class="deck-name-block">
+                  <span class="deck-name" id="deck-name">Base Starter Deck</span>
+                  <span class="deck-legal-tag" id="deck-legal-tag">Legal</span>
+                </div>
+              </div>
+              <div id="deck-summary">
+                <div class="deck-count-row"><span>Pokémon</span><span id="deck-count-pokemon">0</span></div>
+                <div class="deck-count-row"><span>Trainers</span><span id="deck-count-trainer">0</span></div>
+                <div class="deck-count-row"><span>Energies</span><span id="deck-count-energy">0</span></div>
+                <div class="deck-count-row deck-total-row"><span>Total</span><span id="deck-count-total">0</span></div>
+              </div>
+              <button class="btn-secondary" id="btn-change-deck">Change Deck</button>
+            </div>
+          </div>
         </div>
 
-        <div class="match-tools">
-          <button id="coin-btn" class="coin-btn">COIN</button>
-          <div id="status-node" class="status-node">Status: Clear</div>
-          <div id="turn-node" class="status-node">Player Turn</div>
-        </div>
-        <div id="hand-row" class="hand-row"></div>
+        <!-- PLAY MAT ARENA -->
+        <div id="match-arena" class="tcg-board hidden">
 
-        <div class="action-row">
-          <button id="attack-btn" class="primary">⚔️ Declare Attack</button>
-          <button id="concede-btn" class="danger">🏳️ Concede Match</button>
+          <!-- LEFT COLUMN: PRIZES -->
+          <div class="mat-col mat-col-left">
+            <h4 class="mat-col-title">Prizes</h4>
+            <div id="p-prizes" class="prize-stack"></div>
+          </div>
+
+          <!-- CENTER COLUMN -->
+          <div class="mat-col mat-col-center">
+            <div class="active-row">
+              <div class="mat-zone active-zone" id="p-active">
+                <span class="zone-label">Active</span>
+              </div>
+              <div class="status-readout" id="active-status"></div>
+            </div>
+            <div class="bench-row">
+              <div class="mat-zone bench-zone" id="b1"><span class="zone-label">Bench</span></div>
+              <div class="mat-zone bench-zone" id="b2"><span class="zone-label">Bench</span></div>
+              <div class="mat-zone bench-zone" id="b3"><span class="zone-label">Bench</span></div>
+              <div class="mat-zone bench-zone" id="b4"><span class="zone-label">Bench</span></div>
+              <div class="mat-zone bench-zone" id="b5"><span class="zone-label">Bench</span></div>
+            </div>
+
+            <!-- CARD PREVIEW FRAME -->
+            <div class="card-preview-frame">
+              <img id="card-render-img" alt="card preview" />
+              <div id="card-meta">No card selected</div>
+            </div>
+          </div>
+
+          <!-- RIGHT COLUMN: DECK / DISCARD -->
+          <div class="mat-col mat-col-right">
+            <h4 class="mat-col-title">Deck</h4>
+            <div class="mat-zone deck-zone" id="p-deck"><span class="zone-label" id="deck-count-label">60</span></div>
+            <h4 class="mat-col-title">Discard</h4>
+            <div class="mat-zone discard-zone" id="p-discard"><span class="zone-label">0</span></div>
+          </div>
+
+          <!-- BOTTOM HAND ROW -->
+          <div class="hand-row-wrap">
+            <div class="hand-controls">
+              <button class="btn-secondary" id="btn-flip-coin">🪙 Flip Coin</button>
+              <button class="btn-primary" id="btn-attack">⚔️ Attack</button>
+              <button class="btn-danger" id="btn-concede">🏳️ Concede</button>
+              <button class="btn-secondary" id="btn-end-turn">End Turn</button>
+            </div>
+            <div id="hand-row" class="hand-row"></div>
+          </div>
         </div>
+      </section>
+
+      <!-- ===== VIEW 3: PACKS STORE ===== -->
+      <section class="view" id="view-packs">
+        <h2 class="view-title">Booster Packs</h2>
+        <p class="view-sub">Every major set, 1999 – 2026. Prices in NZD.</p>
+        <div id="pack-container" class="pack-grid"></div>
+      </section>
+
+      <!-- ===== VIEW 4: BINDER ===== -->
+      <section class="view" id="view-binder">
+        <h2 class="view-title">Card Binder</h2>
+        <div class="binder-toolbar">
+          <select id="binder-sort">
+            <option value="value-desc">Sort: Value (High → Low)</option>
+            <option value="value-asc">Sort: Value (Low → High)</option>
+            <option value="name">Sort: Name (A–Z)</option>
+            <option value="set">Sort: Set</option>
+          </select>
+          <select id="binder-filter">
+            <option value="all">Filter: All Cards</option>
+            <option value="deck-eligible">Filter: Deck Eligible</option>
+          </select>
+        </div>
+        <div id="binder-container" class="binder-grid"></div>
+      </section>
+
+      <!-- ===== VIEW 5: MARKET ===== -->
+      <section class="view" id="view-market">
+        <h2 class="view-title">Liquidation Market</h2>
+        <p class="view-sub">Sell owned cards for instant cash at fixed NZD buy rates.</p>
+        <div id="market-container" class="binder-grid"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ===== SETTINGS MODAL ===== -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-box glass-panel">
+      <h3 class="panel-title">Account Settings</h3>
+      <label class="modal-label">Trainer Name</label>
+      <input type="text" id="input-trainer-name" maxlength="20" />
+      <div class="modal-actions">
+        <button class="btn-secondary" id="btn-reset-save">Reset Save Data</button>
+        <button class="btn-primary" id="btn-close-settings">Done</button>
       </div>
+    </div>
+  </div>
 
-      <div class="card-stage">
-        <img id="card-render-img" alt="Current card render">
-        <p id="card-meta">No card loaded.</p>
+  <!-- ===== PACK OPEN MODAL ===== -->
+  <div id="pack-open-modal" class="modal-overlay hidden">
+    <div class="modal-box glass-panel pack-open-box">
+      <h3 class="panel-title" id="pack-open-title">Opening Pack…</h3>
+      <div id="pack-open-results" class="pack-open-results"></div>
+      <div class="modal-actions">
+        <button class="btn-primary" id="btn-close-pack-open">Add to Binder</button>
       </div>
-    </section>
+    </div>
+  </div>
 
-    <section id="packs" class="view">
-      <div id="pack-container" class="shop-grid"></div>
-    </section>
+  <!-- ===== MATCH FOUND MODAL ===== -->
+  <div id="match-found-modal" class="modal-overlay hidden">
+    <div class="modal-box glass-panel match-found-box">
+      <h3>Match Found!</h3>
+      <p class="view-sub">Opponent located. Preparing the arena…</p>
+      <div class="match-found-timer" id="match-found-timer">3</div>
+    </div>
+  </div>
 
-    <section id="binder" class="view">
-      <div id="binder-container" class="binder-grid"></div>
-    </section>
-
-    <section id="market" class="view">
-      <div id="market-container" class="market-grid"></div>
-    </section>
-  </main>
+  <!-- ===== DECK CHANGE MODAL ===== -->
+  <div id="deck-modal" class="modal-overlay hidden">
+    <div class="modal-box glass-panel">
+      <h3 class="panel-title">Change Active Deck</h3>
+      <p class="view-sub">Currently only the Base Starter Deck is available. Build custom decks from your Binder (coming soon).</p>
+      <div class="modal-actions">
+        <button class="btn-primary" id="btn-close-deck-modal">Close</button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
