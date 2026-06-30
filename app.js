@@ -1,227 +1,54 @@
-/* ==========================================================================
-   1. Global Engine State Initialization
-   ========================================================================== */
-let wallet = 100.00;
-let inventory = [];
-let match = null;
-
-// Complete Set Matrix Index mapping authentic 2D asset endpoints from pokemontcg.io
-const cardDatabase = {
-    'Base Set (1999)': [
-        { name: 'Charizard Holo', value: 420.00, hp: 120, type: 'Fire', img: 'https://images.pokemontcg.io/base1/4.png' },
-        { name: 'Blastoise Holo', value: 145.00, hp: 100, type: 'Water', img: 'https://images.pokemontcg.io/base1/2.png' },
-        { name: 'Pikachu Common', value: 3.50, hp: 40, type: 'Lightning', img: 'https://images.pokemontcg.io/base1/58.png' }
-    ],
-    'Neo Genesis (2000)': [
-        { name: 'Lugia Holo', value: 280.00, hp: 90, type: 'Colorless', img: 'https://images.pokemontcg.io/neo1/9.png' }
-    ],
-    'EX Ruby & Sapphire (2003)': [
-        { name: 'Sceptile ex', value: 95.00, hp: 150, type: 'Grass', img: 'https://images.pokemontcg.io/ex1/96.png' }
-    ],
-    'Diamond & Pearl (2007)': [
-        { name: 'Torterra LV.X', value: 45.00, hp: 160, type: 'Grass', img: 'https://images.pokemontcg.io/dp1/122.png' }
-    ],
-    'Black & White (2011)': [
-        { name: 'Zekrom Full Art', value: 55.00, hp: 130, type: 'Lightning', img: 'https://images.pokemontcg.io/bw1/114.png' }
-    ],
-    'XY Evolutions (2016)': [
-        { name: 'M Charizard EX', value: 65.00, hp: 220, type: 'Fire', img: 'https://images.pokemontcg.io/xy12/13.png' }
-    ],
-    'Sword & Shield (2020)': [
-        { name: 'Charizard VMAX Shiny', value: 180.00, hp: 330, type: 'Fire', img: 'https://images.pokemontcg.io/swsh45/SV107.png' }
-    ],
-    'Scarlet & Violet (2023)': [
-        { name: 'Miraidon ex SIR', value: 48.00, hp: 220, type: 'Lightning', img: 'https://images.pokemontcg.io/sv1/244.png' }
-    ],
-    'Chaos Rising (2026)': [
-        { name: 'Chaos Dragon Secret Rare', value: 115.00, hp: 280, type: 'Dragon', img: 'https://images.pokemontcg.io/swsh11/195.png' },
-        { name: 'Standard Item Energy Switch', value: 0.20, hp: 0, type: 'Trainer', img: 'https://images.pokemontcg.io/swsh11/180.png' }
-    ]
-};
-
-const setPricing = {
-    'Base Set (1999)': 450.00, 'Neo Genesis (2000)': 320.00, 'EX Ruby & Sapphire (2003)': 180.00,
-    'Diamond & Pearl (2007)': 90.00, 'Black & White (2011)': 45.00, 'XY Evolutions (2016)': 25.00,
-    'Sword & Shield (2020)': 12.00, 'Scarlet & Violet (2023)': 4.99, 'Chaos Rising (2026)': 4.49
-};
-
-/* ==========================================================================
-   2. Core System Data Persistence IO
-   ========================================================================== */
-function uiLog(txt) {
-    const l = document.getElementById('log');
-    l.innerHTML += `<br>>> ${txt}`;
-    l.scrollTop = l.scrollHeight;
-}
-
-function saveGame() {
-    localStorage.setItem('shortcuts_tcg_save', JSON.stringify({ wallet, inventory }));
-}
-
-function loadGame() {
-    const saved = localStorage.getItem('shortcuts_tcg_save');
-    if (saved) {
-        const parsed = JSON.parse(saved);
-        wallet = parsed.wallet ?? 100.00;
-        inventory = parsed.inventory ?? [];
-        uiLog("Profile found. Syncing assets...");
-    } else {
-        uiLog("No profile found. Starting fresh card career!");
-    }
-    syncData();
-}
-
-function syncData() {
-    document.getElementById('cash').innerText = `$${wallet.toFixed(2)}`;
-    let totalWorth = wallet + inventory.reduce((sum, card) => sum + card.value, 0);
-    document.getElementById('worth').innerText = `$${totalWorth.toFixed(2)}`;
-}
-
-/* ==========================================================================
-   3. View Manager Switching Contexts
-   ========================================================================== */
-function tab(t, event) {
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById(`view-${t}`).classList.add('active');
-    
-    if (event) {
-        event.target.classList.add('active');
-    } else {
-        // Fallback programmatic switching highlight selector
-        document.querySelectorAll('.nav-btn').forEach(btn => {
-            if (btn.innerText.toLowerCase().includes(t)) btn.classList.add('active');
-        });
-    }
-    
-    if (t === 'binder') renderBinder();
-    if (t === 'market') renderMarket();
-}
-
-/* ==========================================================================
-   4. Booster Pack Store Mechanics
-   ========================================================================== */
-function initShop() {
-    const container = document.getElementById('pack-container');
-    container.innerHTML = '';
-    for (let set in setPricing) {
-        container.innerHTML += `
-            <div class="list-item">
-                <div><strong>${set}</strong><br><span class="green-txt">$${setPricing[set].toFixed(2)}</span></div>
-                <button class="btn" style="width:auto;" onclick="buyPack('${set}', ${setPricing[set]})">Buy Pack</button>
-            </div>`;
-    }
-}
-
-function buyPack(set, price) {
-    if (wallet < price) return uiLog("Purchase Denied: Insufficient Funds inside wallet.");
-    wallet -= price;
-    
-    let pool = cardDatabase[set];
-    let card = { ...pool[Math.floor(Math.random() * pool.length)], id: Date.now() + Math.random() };
-    inventory.push(card);
-    
-    uiLog(`💥 PULLED: ${card.name} (${set}) valued at $${card.value.toFixed(2)}!`);
-    saveGame();
-    syncData();
-}
-
-/* ==========================================================================
-   5. Official TCG Match-Play Engine Rules Loops
-   ========================================================================== */
-function startMatch(fee, prize, name) {
-    if (wallet < fee) return uiLog("Tournament Entry Denied: Insufficient Registration Fees.");
-    wallet -= fee;
-    syncData();
-    
-    // Choose your top card value asset as active combatant, or standard starter
-    let activeCard = inventory[0] || { name: 'Starter Pikachu', hp: 40, type: 'Lightning', img: 'https://images.pokemontcg.io/base1/58.png', value: 0 };
-    match = { prize, pPrizes: 6, card: activeCard };
-    
-    document.getElementById('tourney-list').style.display = 'none';
-    document.getElementById('arena').style.display = 'block';
-    
-    document.getElementById('p-active').innerText = `${activeCard.name}\n(HP: ${activeCard.hp})`;
-    document.getElementById('p-prizes').innerText = match.pPrizes;
-    
-    // Bind Image Sources and text data endpoints
-    document.getElementById('card-render-img').src = activeCard.img;
-    document.getElementById('card-meta').innerText = `${activeCard.name} | Type: ${activeCard.type} | Value: $${activeCard.value.toFixed(2)}`;
-    
-    uiLog(`Entered ${name}. Shuffling deck... Setup 6 Prize Cards.`);
-}
-
-function turnAction(action) {
-    if (!match) return;
-    
-    if (action === 'concede') {
-        document.getElementById('arena').style.display = 'none';
-        document.getElementById('tourney-list').style.display = 'block';
-        match = null;
-        return uiLog("Match ended. Field returned safely to league hub.");
-    }
-    
-    // Random calculated outcome coin flips simulating damage tracking mechanics
-    if (Math.random() > 0.48) {
-        match.pPrizes--;
-        document.getElementById('p-prizes').innerText = match.pPrizes;
-        uiLog(`⚔️ Knockout! You took 1 Prize Card. (${match.pPrizes} left)`);
-    } else {
-        uiLog("⚠️ Opponent countered! Your active card sustained heavy damage.");
-    }
-    
-    if (match.pPrizes <= 0) {
-        wallet += match.prize;
-        uiLog(`🏆 VICTORY! You won the championship! Prize collected: +$${match.prize.toFixed(2)}`);
-        saveGame();
-        turnAction('concede');
-    }
-    syncData();
-}
-
-/* ==========================================================================
-   6. Binder Showcasing and Liquidation Market Logic
-   ========================================================================== */
-function renderBinder() {
-    const container = document.getElementById('binder-container');
-    container.innerHTML = inventory.length ? '' : '<p style="padding:10px; color:#888;">Your binder vault is completely empty.</p>';
-    
-    inventory.forEach(c => {
-        container.innerHTML += `
-            <div class="grid-card-item">
-                <img src="${c.img}" alt="${c.name}">
-                <b>${c.name}</b>
-                <span class="green-txt">$${c.value.toFixed(2)}</span>
-            </div>`;
-    });
-}
-
-function renderMarket() {
-    const container = document.getElementById('market-container');
-    container.innerHTML = inventory.length ? '' : '<p style="padding:10px; color:#888;">No items in assets index to trade.</p>';
-    
-    inventory.forEach((c, idx) => {
-        container.innerHTML += `
-            <div class="grid-card-item">
-                <img src="${c.img}" alt="${c.name}">
-                <b>${c.name}</b>
-                <span class="green-txt" style="margin-bottom:4px;">$${c.value.toFixed(2)}</span>
-                <button class="btn" onclick="sell(${idx})">Liquidate</button>
-            </div>`;
-    });
-}
-
-function sell(idx) {
-    wallet += inventory[idx].value;
-    uiLog(`⚖️ SOLD: Liquidated ${inventory[idx].name} at current spot index marketplace pricing.`);
-    inventory.splice(idx, 1);
-    saveGame();
-    renderMarket();
-    syncData();
-}
-
-/* ==========================================================================
-   7. System Boot Engine Hook Execution
-   ========================================================================== */
-initShop();
-loadGame();
+const $=id=>document.getElementById(id),nz=new Intl.NumberFormat("en-NZ",{style:"currency",currency:"NZD"});let wallet=100,inventory=[],activeDeck=[],match=null,logs=[],invSort="value",eraFilter="all";
+const imgBase="https://images.pokemontcg.io/";
+const PACKS=[
+["Classic Era","Base Set (1999)",1250,"base1","Charizard Holo",950,"4","Pikachu",10,"58"],["Classic Era","Jungle (1999)",280,"base2","Flareon Holo",95,"3","Oddish",2,"58"],["Classic Era","Fossil (1999)",280,"base3","Gengar Holo",120,"5","Zubat",2,"57"],["Classic Era","Base Set 2 (2000)",320,"base4","Mewtwo Holo",110,"10","Chansey",18,"3"],["Classic Era","Team Rocket (2000)",350,"base5","Dark Raichu Holo",165,"83","Dark Raticate",3,"51"],["Classic Era","Gym Heroes (2000)",380,"gym1","Blaine's Moltres",140,"1","Brock's Sandshrew",3,"72"],["Classic Era","Gym Challenge (2000)",420,"gym2","Sabrina's Gengar",210,"14","Erika's Bellsprout",3,"75"],["Classic Era","Neo Genesis (2000)",650,"neo1","Lugia Holo",480,"9","Chikorita",4,"53"],["Classic Era","Neo Discovery (2001)",380,"neo2","Umbreon Holo",230,"13","Kakuna",3,"46"],["Classic Era","Neo Revelation (2001)",550,"neo3","Shining Gyarados",450,"65","Remoraid",3,"59"],["Classic Era","Neo Destiny (2002)",950,"neo4","Shining Charizard",1200,"107","Light Jolteon",10,"48"],["Classic Era","Southern Islands (2001)",250,"si1","Mew",180,"1","Togepi",15,"4"],["Classic Era","Legendary Collection (2002)",780,"base6","Reverse Holo Charizard",850,"3","Potion Energy",4,"101"],["Classic Era","Expedition Base Set (2002)",580,"ecard1","Tyranitar Holo",220,"29","Bulbasaur",7,"94"],["Classic Era","Aquapolis (2002)",850,"ecard2","Lugia Crystal",900,"149","Growlithe",7,"80"],["Classic Era","Skyridge (2003)",1650,"ecard3","Charizard Crystal",1500,"146","Pikachu",18,"84"],
+["EX Era","EX Ruby & Sapphire (2003)",380,"ex1","Mewtwo ex",140,"101","Torchic",6,"74"],["EX Era","EX Sandstorm (2003)",240,"ex2","Typhlosion ex",95,"99","Eevee",5,"63"],["EX Era","EX Dragon (2003)",260,"ex3","Rayquaza ex",180,"97","Trapinch",4,"79"],["EX Era","EX Team Magma vs Team Aqua (2004)",240,"ex4","Houndoom",65,"34","Team Aqua's Poochyena",4,"59"],["EX Era","EX Hidden Legends (2004)",280,"ex5","Regice ex",110,"97","Feebas",4,"61"],["EX Era","EX FireRed & LeafGreen (2004)",480,"ex6","Charizard ex",420,"105","Charmander",8,"57"],["EX Era","EX Team Rocket Returns (2004)",580,"ex7","Mudkip Gold Star",650,"107","Dark Dragonair",8,"31"],["EX Era","EX Deoxys (2005)",820,"ex8","Rayquaza Gold Star",1100,"107","Bagon",6,"53"],["EX Era","EX Emerald (2005)",280,"ex9","Milotic ex",130,"96","Pikachu",7,"60"],["EX Era","EX Unseen Forces (2005)",550,"ex10","Celebi Gold Star",480,"100","Espeon",26,"16"],["EX Era","EX Delta Species (2005)",490,"ex11","Metagross Gold Star",420,"113","Ditto",9,"36"],["EX Era","EX Legend Maker (2006)",420,"ex12","Registeel Gold Star",360,"92","Omanyte",5,"60"],["EX Era","EX Holon Phantoms (2006)",450,"ex13","Pikachu Gold Star",680,"104","Gyarados",20,"8"],["EX Era","EX Crystal Guardians (2006)",480,"ex14","Charizard Delta",290,"4","Squirtle",8,"64"],["EX Era","EX Dragon Frontiers (2006)",650,"ex15","Charizard Gold Star",1250,"100","Totodile",7,"67"],["EX Era","EX Power Keepers (2007)",320,"ex16","Charizard Holo",110,"6","Absol",10,"18"],
+["Special Booster Series","POP Series 1 (2004)",45,"pop1","Tyranitar ex",115,"17","Pikachu",8,"13"],["Special Booster Series","POP Series 2 (2005)",42,"pop2","Pikachu",18,"16","Squirtle",7,"17"],["Special Booster Series","POP Series 3 (2006)",46,"pop3","Flareon Gold Star",310,"17","Jolteon",15,"3"],["Special Booster Series","POP Series 4 (2006)",48,"pop4","Mew",85,"4","Mudkip",6,"10"],["Special Booster Series","POP Series 5 (2007)",55,"pop5","Umbreon Gold Star",650,"17","Espeon Gold Star",620,"16"],["Special Booster Series","POP Series 6 (2007)",38,"pop6","Lucario",25,"2","Chimchar",5,"12"],["Special Booster Series","POP Series 7 (2008)",36,"pop7","Latias",32,"3","Mareep",4,"12"],["Special Booster Series","POP Series 8 (2008)",34,"pop8","Heatran",28,"1","Riolu",5,"12"],["Special Booster Series","POP Series 9 (2009)",40,"pop9","Raichu",38,"3","Pikachu",10,"15"],
+["DP/HGSS Era","Diamond & Pearl (2007)",195,"dp1","Torterra LV.X",55,"122","Shinx",4,"98"],["DP/HGSS Era","Mysterious Treasures (2007)",165,"dp2","Lucario LV.X",45,"122","Abra",3,"69"],["DP/HGSS Era","Secret Wonders (2007)",180,"dp3","Charizard Secret",90,"3","Bulbasaur",4,"77"],["DP/HGSS Era","Great Encounters (2008)",160,"dp4","Darkrai LV.X",40,"104","Porygon",3,"75"],["DP/HGSS Era","Majestic Dawn (2008)",210,"dp5","Glaceon LV.X",120,"98","Eevee",6,"63"],["DP/HGSS Era","Legends Awakened (2008)",240,"dp6","Mewtwo LV.X",95,"144","Dratini",5,"76"],["DP/HGSS Era","Stormfront (2008)",290,"dp7","Charizard Secret",260,"103","Duskull",3,"59"],["DP/HGSS Era","Platinum Base (2009)",180,"pl1","Giratina LV.X",65,"124","Piplup",4,"85"],["DP/HGSS Era","Rising Rivals (2009)",210,"pl2","Alakazam 4 LV.X",90,"103","Eevee",5,"59"],["DP/HGSS Era","Supreme Victors (2009)",195,"pl3","Charizard G LV.X",185,"143","Garchomp C",7,"60"],["DP/HGSS Era","Arceus (2009)",180,"pl4","Gengar LV.X",85,"97","Pikachu",5,"71"],["DP/HGSS Era","HeartGold SoulSilver (2010)",290,"hgss1","Lugia LEGEND",145,"113","Cyndaquil",5,"61"],["DP/HGSS Era","HGSS Unleashed (2010)",195,"hgss2","Crobat Prime",35,"84","Larvitar",4,"50"],["DP/HGSS Era","HGSS Undaunted (2010)",240,"hgss3","Umbreon Prime",110,"86","Eevee",7,"48"],["DP/HGSS Era","HGSS Triumphant (2010)",270,"hgss4","Gengar Prime",130,"94","Magikarp",4,"65"],["DP/HGSS Era","Call of Legends (2011)",380,"col1","Shiny Rayquaza",240,"SL10","Eevee",6,"48"],
+["Black & White Era","Black & White Base (2011)",85,"bw1","Zekrom Full Art",45,"114","Snivy",2,"1"],["Black & White Era","Emerging Powers (2011)",60,"bw2","Tornadus Full Art",15,"98","Pidove",1,"84"],["Black & White Era","Noble Victories (2011)",105,"bw3","N Full Art",95,"101","Axew",2,"86"],["Black & White Era","Next Destinies (2012)",125,"bw4","Mewtwo EX",75,"54","Shinx",2,"45"],["Black & White Era","Dark Explorers (2012)",195,"bw5","Darkrai EX Full Art",110,"107","Eevee",3,"84"],["Black & White Era","Dragons Exalted (2012)",165,"bw6","Rayquaza EX",85,"85","Gible",2,"87"],["Black & White Era","Boundaries Crossed (2012)",155,"bw7","Computer Search",65,"137","Charmander",3,"18"],["Black & White Era","Plasma Storm (2013)",180,"bw8","Charizard Shiny Secret",380,"136","Trubbish",2,"65"],["Black & White Era","Plasma Freeze (2013)",195,"bw9","Ultra Ball Secret",160,"122","Deino",2,"77"],["Black & White Era","Plasma Blast (2013)",155,"bw10","Iris Full Art",95,"101","Squirtle",3,"14"],["Black & White Era","Legendary Treasures (2013)",220,"bw11","Mew EX Gold",55,"RC24","Pikachu",4,"RC7"],
+["XY Era","XY Base (2014)",60,"xy1","Yveltal EX",20,"79","Froakie",2,"39"],["XY Era","Flashfire (2014)",155,"xy2","Charizard EX Secret",280,"100","Shinx",2,"32"],["XY Era","Furious Fists (2014)",55,"xy3","Lucario EX",18,"54","Eevee",2,"80"],["XY Era","Phantom Forces (2014)",90,"xy4","Gengar EX Shiny",55,"114","Murkrow",2,"51"],["XY Era","Primal Clash (2015)",60,"xy5","Kyogre EX Primal",45,"55","Bunnelby",2,"121"],["XY Era","Roaring Skies (2015)",75,"xy6","Shaymin EX",30,"77","Pikachu",3,"20"],["XY Era","Ancient Origins (2015)",70,"xy7","Rayquaza EX Shiny",95,"98","Eevee",3,"63"],["XY Era","BREAKthrough (2015)",48,"xy8","Mewtwo EX Red",35,"158","Zorua",2,"89"],["XY Era","BREAKpoint (2016)",52,"xy9","Gyarados EX Shiny",40,"123","Froakie",2,"38"],["XY Era","Generations (2016)",95,"g1","Charizard Radiant",45,"RC5","Pikachu",5,"RC29"],["XY Era","Fates Collide (2016)",45,"xy10","Alakazam EX Secret",35,"125","Snivy",2,"5"],["XY Era","Steam Siege (2016)",35,"xy11","Volcanion EX",10,"26","Mareep",1,"38"],["XY Era","Evolutions (2016)",58,"xy12","Charizard Holo Reprint",95,"11","Pikachu",4,"35"],
+["Sun & Moon Era","Sun & Moon Base (2017)",30,"sm1","Solgaleo GX Rainbow",35,"155","Litten",2,"24"],["Sun & Moon Era","Guardians Rising (2017)",32,"sm2","Tapu Lele GX",25,"60","Alolan Vulpix",2,"21"],["Sun & Moon Era","Burning Shadows (2017)",48,"sm3","Charizard GX Rainbow",450,"150","Charmander",3,"18"],["Sun & Moon Era","Shining Legends (2017)",85,"sm35","Mewtube Secret",135,"78","Pikachu",3,"28"],["Sun & Moon Era","Crimson Invasion (2017)",25,"sm4","Lusamine Full Art",40,"110","Jangmo-o",2,"75"],["Sun & Moon Era","Ultra Prism (2018)",62,"sm5","Lillie Full Art",380,"151","Eevee",3,"104"],["Sun & Moon Era","Forbidden Light (2018)",38,"sm6","Ultra Necrozma Rainbow",35,"140","Froakie",2,"22"],["Sun & Moon Era","Celestial Storm (2018)",45,"sm7","Rayquaza GX Rainbow",115,"177","Mudkip",3,"33"],["Sun & Moon Era","Dragon Majesty (2018)",75,"sm75","Reshiram GX Rainbow",45,"71","Charmander",3,"3"],["Sun & Moon Era","Lost Thunder (2018)",48,"sm8","Lugia GX Rainbow",185,"227","Chikorita",2,"5"],["Sun & Moon Era","Team Up (2019)",135,"sm9","Latias & Latios GX Alt Art",950,"170","Eevee & Snorlax GX",25,"120"],["Sun & Moon Era","Unbroken Bonds (2019)",85,"sm10","Reshiram & Charizard GX",145,"217","Squirtle",3,"33"],["Sun & Moon Era","Unified Minds (2019)",75,"sm11","Mewtwo & Mew GX Alt",195,"242","Munchlax",3,"173"],["Sun & Moon Era","Hidden Fates (2019)",42,"sm115","Charizard GX Shiny SV49",520,"SV49","Eevee",4,"49"],["Sun & Moon Era","Cosmic Eclipse (2019)",90,"sm12","Arceus & Dialga & Palkia Alt",165,"221","Piplup",5,"239"],
+["Sword & Shield Era","Sword & Shield Base (2020)",19.5,"swsh1","Zacian V Gold",25,"211","Grookey",2,"11"],["Sword & Shield Era","Rebel Clash (2020)",16.5,"swsh2","Sonia Full Art",35,"192","Galarian Meowth",1,"126"],["Sword & Shield Era","Darkness Ablaze (2020)",21,"swsh3","Charizard VMAX",45,"20","Torchic",1,"23"],["Sword & Shield Era","Champions Path (2020)",45,"swsh35","Charizard V Shiny",240,"79","Machop",1,"25"],["Sword & Shield Era","Vivid Voltage (2020)",19.5,"swsh4","Pikachu VMAX Rainbow",185,"188","Charmander",2,"23"],["Sword & Shield Era","Shining Fates (2021)",25,"swsh45","Charizard VMAX Shiny",150,"SV107","Eevee",2,"52"],["Sword & Shield Era","Battle Styles (2021)",12.5,"swsh5","Tyranitar V Alt Art",120,"155","Houndour",1,"95"],["Sword & Shield Era","Chilling Reign (2021)",19.5,"swsh6","Blaziken VMAX Alt Art",280,"201","Sobble",1,"41"],["Sword & Shield Era","Evolving Skies (2021)",39,"swsh7","Umbreon VMAX Alt Art",1100,"215","Eevee",3,"125"],["Sword & Shield Era","Celebrations (2021)",22.5,"cel25","Charizard Classic",95,"4","Surfing Pikachu VMAX",5,"9"],["Sword & Shield Era","Fusion Strike (2021)",16.5,"swsh8","Gengar VMAX Alt Art",320,"271","Mew V",9,"113"],["Sword & Shield Era","Brilliant Stars (2022)",19.5,"swsh9","Charizard V Alt Art",220,"154","Bidoof",1,"120"],["Sword & Shield Era","Astral Radiance (2022)",15.5,"swsh10","Machamp V Alt Art",145,"172","Hisuian Growlithe",1,"70"],["Sword & Shield Era","Pokémon GO (2022)",14.5,"pgo","Mewtwo V Alt Art",45,"72","Bidoof",1,"59"],["Sword & Shield Era","Lost Origin (2022)",16.5,"swsh11","Giratina V Alt Art",480,"186","Pikachu",2,"52"],["Sword & Shield Era","Silver Tempest (2022)",15.5,"swsh12","Lugia V Alt Art",260,"186","Dratini",1,"129"],
+["Scarlet & Violet Era","Crown Zenith (2023)",22,"swsh12pt5","Giratina VSTAR GG",145,"GG69","Bidoof GG",8,"GG29"],["Scarlet & Violet Era","Scarlet & Violet Base (2023)",11,"sv1","Miriam SIR",45,"251","Fuecoco",1,"36"],["Scarlet & Violet Era","Paldea Evolved (2023)",11,"sv2","Iono SIR",110,"269","Magikarp",18,"203"],["Scarlet & Violet Era","Obsidian Flames (2023)",11,"sv3","Charizard ex SIR",75,"223","Pidgey",6,"207"],["Scarlet & Violet Era","151 Special Set (2023)",18,"sv3pt5","Charizard ex SIR",165,"199","Pikachu",14,"173"],["Scarlet & Violet Era","Paradox Rift (2023)",11,"sv4","Roaring Moon ex SIR",95,"251","Iron Valiant ex",55,"249"],["Scarlet & Violet Era","Paldean Fates (2024)",14,"sv4pt5","Charizard ex Shiny SIR",185,"234","Mew ex",120,"232"],["Scarlet & Violet Era","Temporal Forces (2024)",11,"sv5","Iron Leaves ex SIR",65,"203","Walking Wake ex",85,"205"],["Scarlet & Violet Era","Twilight Masquerade (2024)",11,"sv6","Greninja ex SIR",290,"214","Eevee",90,"188"],["Scarlet & Violet Era","Shrouded Fable (2024)",11,"sv6pt5","Cassiopeia SIR",85,"94","Pecharunt ex",45,"93"],["Scarlet & Violet Era","Stellar Crown (2024)",11,"sv7","Terapagos ex SIR",110,"170","Squirtle",75,"148"],["Scarlet & Violet Era","Surging Sparks (2024)",11,"sv8","Pikachu ex SIR",380,"238","Latias ex",240,"239"],["Scarlet & Violet Era","Prismatic Evolutions (2025)",14,"sv8pt5","Eevee Friends SIR",220,"161","Umbreon ex",980,"161"],["Scarlet & Violet Era","Journey Together (2025)",12,"sv9","N's Zoroark ex SIR",135,"185","Lillie's Clefairy ex",95,"184"],["Scarlet & Violet Era","Destined Rivals (2025)",12,"sv10","Team Rocket's Mewtwo ex SIR",260,"231","Ethan's Ho-Oh ex",180,"230"],["Scarlet & Violet Era","Black Bolt (2025)",12,"zsv10pt5","Zekrom ex SIR",170,"86","Victini",32,"172"],["Scarlet & Violet Era","White Flare (2025)",12,"rsv10pt5","Reshiram ex SIR",170,"86","Snivy",28,"1"],["Scarlet & Violet Era","Mega Evolution (2025)",12.5,"sv11","Mega Lucario ex SIR",155,"188","Mega Gardevoir ex",190,"190"],["Scarlet & Violet Era","Phantasmal Flames (2025)",12.5,"sv12","Mega Charizard X ex SIR",420,"223","Gengar ex",135,"215"],["Scarlet & Violet Era","Chaos Rising (2026)",10.5,"sv13","Chaos Dragon Secret",165,"201","Rift Pikachu",22,"25"],["Scarlet & Violet Era","Horizon Zero (2026)",10.5,"sv14","Stellar Rayquaza ex",150,"205","Horizon Eevee",18,"133"]
+].map((r,i)=>({id:"p"+i,era:r[0],name:r[1],price:r[2],set:r[3],cards:[{name:r[7],value:r[8],num:r[9],tier:"Common/Uncommon",w:75},{name:r[4]+" Holo",value:Math.max(3,Math.round(r[5]*.28)),num:r[6],tier:"Holo Rare",w:18},{name:r[4],value:r[5],num:r[6],tier:"Ultra Rare/SIR",w:6},{name:r[4]+" Secret",value:Math.round(r[5]*1.75),num:r[6],tier:"Secret Rare",w:1}]}));
+const NPC=[{id:"Matiu",hp:130,damage:30,text:"Kauri Jab",style:"balanced"},{id:"Aroha",hp:170,damage:45,text:"Harbour Burst",style:"bench"},{id:"Tane",hp:220,damage:60,text:"National Thunder",style:"aggro"}];
+const TOURNAMENTS=[{name:"Local Auckland Cup",fee:12,reward:35,npc:NPC[0]},{name:"Wellington Gym Series",fee:25,reward:82,npc:NPC[1]},{name:"NZ Nationals",fee:60,reward:220,npc:NPC[2]}],STATUS=["Clear","Asleep","Poisoned","Burned","Paralyzed","Confused"];
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}function image(set,num){return imgBase+set+"/"+num+".png"}function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
+function prizeYield(c){const n=(c.name||"").toLowerCase();return n.includes("vmax")?3:/\bex\b| gx| v\b|lv\.x| ex/.test(n)?2:1}function hpFor(c){return c.kind==="energy"||c.kind==="item"?0:Math.min(330,90+Math.round((c.value||1)/12)+prizeYield(c)*30)}function dmgFor(c){return Math.max(20,Math.min(160,30+Math.round((c.value||1)/25)+prizeYield(c)*10))}function cardCopy(c){return {...c,playId:uid(),hp:hpFor(c),maxHp:hpFor(c),energy:0,status:"Clear",damage:dmgFor(c),prize:prizeYield(c),basic:!/(vmax|stage|lv\.x)/i.test(c.name)}}
+function saveGame(){localStorage.setItem("shortcuts_tcg_save",JSON.stringify({wallet,inventory,activeDeck}))}function loadGame(){try{const s=JSON.parse(localStorage.getItem("shortcuts_tcg_save")||"{}");wallet=Number.isFinite(s.wallet)?s.wallet:100;inventory=Array.isArray(s.inventory)?s.inventory:[];activeDeck=Array.isArray(s.activeDeck)?s.activeDeck:[]}catch{wallet=100;inventory=[];activeDeck=[]}if(!inventory.length)giftStarter()}
+function giftStarter(){for(let i=0;i<12;i++)inventory.push({uid:uid(),name:i%2?"Starter Pikachu":"Starter Bulbasaur",setName:"Base Starter Deck",set:"basep",num:i%2?"1":"2",value:0,img:image("basep",i%2?"1":"2"),starter:true,ns:true,time:Date.now()});activeDeck=inventory.slice(0,12).map(c=>c.uid);log("Base Starter Deck granted for anti-softlock play.");saveGame()}
+function log(t){logs.unshift("› "+t);logs=logs.slice(0,6);$("log").innerHTML=logs.map(x=>`<p>${esc(x)}</p>`).join("")}function assets(){return wallet+inventory.reduce((a,c)=>a+c.value,0)}function updateStats(){$("wallet-stat").textContent=nz.format(wallet);$("asset-stat").textContent=nz.format(assets())}
+function setCardStage(c,msg){const img=$("card-render-img");img.src=c?c.img:"";img.style.visibility=c?"visible":"hidden";img.onerror=()=>{img.style.visibility="hidden"};$("card-meta").textContent=c?`${c.name} • ${c.setName} • ${nz.format(c.value)} NZD • ${c.tier||"Card"}`:msg||"No card loaded."}
+function imgHtml(c){return `<img src="${c.img}" alt="${esc(c.name)}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'fallback-card',textContent:'${esc(c.name)}'}))">`}
+function weightedCard(p){let r=Math.random()*100,a=0;for(const c of p.cards){a+=c.w;if(r<=a)return c}return p.cards[0]}function pullCard(pack){const base=weightedCard(pack),card={uid:uid(),name:base.name,setName:pack.name,era:pack.era,set:pack.set,num:base.num,value:base.value,img:image(pack.set,base.num),tier:base.tier,time:Date.now()};inventory.push(card);setCardStage(card);log(`Pulled ${card.tier}: ${card.name} from ${pack.name} (${nz.format(card.value)}).`);return card}
+function buyPack(id){const p=PACKS.find(x=>x.id===id);if(!p)return;if(wallet<p.price){log(`Insufficient NZD for ${p.name}.`);return}wallet=+(wallet-p.price).toFixed(2);pullCard(p);saveGame();renderAll()}
+function renderPacks(){$("pack-container").innerHTML=PACKS.map(p=>`<article class="pack-card"><span class="era">${p.era}</span><h3>${esc(p.name)}</h3><p>Pack: <b class="money">${nz.format(p.price)}</b></p><p>Weighted: 75/18/6/1</p><button onclick="buyPack('${p.id}')">Buy Pack</button></article>`).join("")}
+function controls(){const eras=[...new Set(inventory.map(c=>c.era||"Starter"))].sort();return `<div class="filter-row"><span>Sort</span><select onchange="invSort=this.value;renderAll()"><option value="value"${invSort==="value"?" selected":""}>Highest Value</option><option value="name"${invSort==="name"?" selected":""}>Name A-Z</option></select><select onchange="eraFilter=this.value;renderAll()"><option value="all">All Eras</option>${eras.map(e=>`<option${eraFilter===e?" selected":""}>${esc(e)}</option>`).join("")}</select></div>`}
+function sortedInv(){let a=inventory.filter(c=>eraFilter==="all"||(c.era||"Starter")===eraFilter);return a.sort(invSort==="name"?(x,y)=>x.name.localeCompare(y.name):(x,y)=>y.value-x.value)}
+function completion(){const have=new Set(inventory.map(c=>c.setName)).size,total=PACKS.length,pct=total?Math.round(have/total*1000)/10:0;return `<div class="progress-banner">Set completion: <b class="money">${pct}%</b> <span>${have}/${total} expansion layers</span> <span>Deck ${activeDeck.length}/60</span></div>`}
+function renderBinder(){const el=$("binder-container");const cards=sortedInv();el.innerHTML=completion()+controls()+(cards.length?cards.map(c=>`<article class="card-tile"><div onclick="previewCard('${c.uid}')">${imgHtml(c)}<h3>${esc(c.name)}</h3><p>${esc(c.setName)}</p><p class="money">${nz.format(c.value)}</p></div><button class="deck-btn ${activeDeck.includes(c.uid)?"equipped":""}" onclick="toggleDeck('${c.uid}')">${activeDeck.includes(c.uid)?"Equipped":"Equip to Deck"}</button></article>`).join(""):`<div class="empty">No cards in the binder yet.</div>`)}
+function renderMarket(){const el=$("market-container"),cards=sortedInv();el.innerHTML=controls()+(cards.length?cards.map(c=>`<article class="sell-card">${imgHtml(c)}<h3>${esc(c.name)}</h3><p>${esc(c.setName)}</p><p class="money">${nz.format(c.value)}</p><button onclick="sellCard('${c.uid}')" ${c.ns?"disabled":""}>${c.ns?"Locked":"Sell Now"}</button></article>`).join(""):`<div class="empty">The liquidation desk is empty.</div>`)}
+function previewCard(uid){const c=inventory.find(x=>x.uid===uid);if(c){setCardStage(c);log(`Binder focus: ${c.name}.`)}}function toggleDeck(uid){const c=inventory.find(x=>x.uid===uid);if(!c)return;if(activeDeck.includes(uid))activeDeck=activeDeck.filter(x=>x!==uid);else{const copies=activeDeck.map(id=>inventory.find(c=>c.uid===id)).filter(x=>x&&x.name===c.name).length;if(copies>=4){log("Deck limit: max 4 duplicate copies.");return}if(activeDeck.length>=60){log("Deck is already capped at 60 cards.");return}activeDeck.push(uid)}saveGame();renderAll()}
+function sellCard(uid){const i=inventory.findIndex(c=>c.uid===uid);if(i<0||inventory[i].ns)return log("Starter deck cards are non-sellable.");const [c]=inventory.splice(i,1);activeDeck=activeDeck.filter(id=>id!==uid);wallet=+(wallet+c.value).toFixed(2);setCardStage(c,`${c.name} liquidated.`);log(`Sold ${c.name} for ${nz.format(c.value)}.`);saveGame();renderAll()}
+function renderTournaments(){$("tournament-menu").innerHTML=TOURNAMENTS.map((t,i)=>`<article class="tier"><div><h3>${t.name}</h3><p>Entry ${nz.format(t.fee)} • Prize ${nz.format(t.reward)} • NPC ${t.npc.id}</p></div><button onclick="startMatch(${i})">Enter</button></article>`).join("")}
+function volatility(){inventory.forEach(c=>{if(!c.ns)c.value=+(Math.max(1,c.value*(.93+Math.random()*.19))).toFixed(2)});log("Market volatility applied: owned assets shifted -7% to +12%.")}
+function filler(n){const out=[];for(let i=0;i<n;i++)out.push({uid:"fill"+uid(),name:i%2?"Basic Energy":"Standard Item",setName:"League Filler",era:"Filler",set:"basep",num:i%2?"10":"11",value:0,img:image("basep",i%2?"10":"11"),kind:i%2?"energy":"item",basic:false,ns:true});return out}
+function buildDeck(){let cards=activeDeck.map(id=>inventory.find(c=>c.uid===id)).filter(Boolean);if(!cards.length)cards=inventory.slice(0,12);cards=cards.slice(0,60);cards=cards.concat(filler(60-cards.length));return shuffle(cards.map(cardCopy))}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function draw(who,n=1){for(let i=0;i<n;i++){if(!match[who].deck.length){finish(who==="p"?"DEFEAT":"VICTORY",`${who==="p"?"Player":"Opponent"} deck exhausted.`);return false}match[who].hand.push(match[who].deck.shift())}return true}
+function setupSide(deck,npc){let side={deck,hand:[],bench:[],discard:[],prizes:6,active:null,attached:false};for(let i=0;i<7;i++)side.hand.push(side.deck.shift());let basic=side.hand.find(c=>c.basic&&c.hp>0);if(!basic){basic=cardCopy(npc?{name:npc.id+" Basic",value:30,img:image("basep","1")}:{name:"Starter Basic",value:0,img:image("basep","1")});side.hand.push(basic)}side.active=basic;side.hand=side.hand.filter(c=>c.playId!==basic.playId);for(let i=0;i<5;i++){let b=side.hand.find(c=>c.basic&&c.hp>0);if(!b)break;side.bench.push(b);side.hand=side.hand.filter(c=>c.playId!==b.playId)}return side}
+function startMatch(i){const t=TOURNAMENTS[i];if(wallet<t.fee)return log(`Need ${nz.format(t.fee)} for ${t.name}.`);wallet=+(wallet-t.fee).toFixed(2);volatility();const pDeck=buildDeck();if(pDeck.length!==60)return log("Deck validation failed: exactly 60 cards required.");const oDeck=shuffle([...Array(12)].map((_,x)=>cardCopy({name:t.npc.id+" Basic "+(x+1),value:40,img:image("basep","1")})).concat(filler(48).map(cardCopy)));match={tier:t,totalDamage:0,lastCoin:"",turn:"p",p:setupSide(pDeck),o:setupSide(oDeck,t.npc)};$("tournament-menu").classList.add("hidden");$("arena").classList.remove("hidden");draw("p",1);log(`${t.name} begins. Drew 7, found a Basic, then drew for turn.`);saveGame();renderAll()}
+function zoneCard(c){return c?`<div class="hpbar"><i style="width:${Math.max(0,c.hp/c.maxHp*100)}%"></i></div><small>${c.hp}/${c.maxHp} HP • ${c.energy}E</small>${imgHtml(c)}<span>${esc(c.name)}</span>`:"Empty"}function paintBoard(){if(!match)return;$("p-prizes").innerHTML=`Prize Cards<br><b>${match.p.prizes}</b>`;$("o-prizes").innerHTML=`Opponent Prizes<br><b>${match.o.prizes}</b>`;$("o-hand").innerHTML=`Opponent Hand<br><b>${match.o.hand.length}</b>`;$("deck-pile").innerHTML=`Deck Pile<br><b>${match.p.deck.length}</b>`;$("discard-pile").innerHTML=`Discard<br><b>${match.p.discard.length}</b>`;$("p-active").className="mat-zone active-zone filled";$("o-active").className="mat-zone active-zone filled";$("p-active").innerHTML=zoneCard(match.p.active);$("o-active").innerHTML=zoneCard(match.o.active);$("status-node").textContent=`Status: ${match.p.active.status}`;$("turn-node").textContent=match.turn==="p"?"Player Turn":"Opponent Turn";for(let i=1;i<=5;i++){const c=match.p.bench[i-1],z=$("b"+i);z.className="mat-zone bench-slot"+(c?" filled":"");z.innerHTML=c?zoneCard(c):`Bench ${i}`}$("hand-row").innerHTML=match.p.hand.map(c=>`<button class="hand-card ${c.kind==="energy"?"energy":""}" onclick="attachEnergy('${c.playId}')"><b>${esc(c.name)}</b>${c.kind==="energy"?"Attach Energy":c.kind==="item"?"Item":"Hand Card"}</button>`).join("")}
+function attachEnergy(id){if(!match||match.turn!=="p")return log("Energy attaches only during player turn.");if(match.p.attached)return log("One Energy attachment per turn.");const i=match.p.hand.findIndex(c=>c.playId===id&&c.kind==="energy");if(i<0)return log("Select an Energy card from hand.");match.p.hand.splice(i,1);match.p.active.energy++;match.p.attached=true;log(`Energy attached to ${match.p.active.name}.`);renderAll()}
+function flipCoin(){if(!match)return log("No active match for coin flip.");match.lastCoin=Math.random()<.5?"HEADS":"TAILS";log(`Coin flip result: ${match.lastCoin}.`);return match.lastCoin}
+function award(side,n){side.prizes=Math.max(0,side.prizes-n);return side.prizes<=0}function replaceActive(side){if(!side.bench.length)return false;side.discard.push(side.active);side.active=side.bench.shift();return true}
+function attack(){if(!match)return log("No match active.");if(match.turn!=="p")return log("Opponent turn is resolving.");if(match.p.active.status==="Asleep"||match.p.active.status==="Paralyzed")return endPlayerTurn(`${match.p.active.status} prevents attacking.`);let coin=flipCoin(),dmg=match.p.active.damage+(coin==="HEADS"?20:0)+match.p.active.energy*10;match.o.active.hp-=dmg;match.totalDamage+=dmg;log(`${match.p.active.name} attacks for ${dmg}.`);if(match.o.active.hp<=0){const y=match.o.active.prize;log(`Knockout! Player takes ${y} prize card(s).`);if(award(match.p,y))return finish("VICTORY","All 6 prize cards taken.");if(!replaceActive(match.o))return finish("VICTORY","Opponent has no Benched Pokemon.")}endPlayerTurn()}
+function endPlayerTurn(msg){if(msg)log(msg);match.turn="o";match.p.attached=false;paintBoard();setTimeout(opponentTurn,350)}
+function opponentTurn(){if(!match)return;if(!draw("o",1))return;let dmg=match.tier.npc.damage+(match.tier.npc.style==="aggro"?15:0);match.p.active.hp-=dmg;match.totalDamage+=dmg;log(`${match.tier.npc.id} uses ${match.tier.npc.text} for ${dmg}.`);if(Math.random()<.18)match.p.active.status=STATUS[1+Math.floor(Math.random()*5)];if(match.p.active.hp<=0){const y=match.p.active.prize;log(`Your Active was knocked out. Opponent takes ${y} prize card(s).`);if(award(match.o,y))return finish("DEFEAT","Opponent took all 6 prize cards.");if(!replaceActive(match.p))return finish("DEFEAT","No Benched Pokemon remain.")}match.turn="p";match.o.attached=false;if(!draw("p",1))return;log("Player turn: drew 1 card.");paintBoard()}
+function finish(kind,reason){if(!match)return;const payout=kind==="VICTORY"?match.tier.reward:0;if(payout)wallet=+(wallet+payout).toFixed(2);showModal(kind,reason,payout,match.totalDamage);teardown();saveGame();renderAll()}
+function teardown(){match=null;$("arena").classList.add("hidden");$("tournament-menu").classList.remove("hidden");["p-active","o-active","b1","b2","b3","b4","b5"].forEach((id,i)=>{$(id).className="mat-zone "+(id.includes("active")?"active-zone":"bench-slot");$(id).textContent=id==="o-active"?"Opponent Active":id==="p-active"?"Active Pokémon":`Bench ${i-1}`});$("p-prizes").innerHTML="Prize Cards<br><b>6</b>";$("o-prizes").innerHTML="Opponent Prizes<br><b>6</b>";$("o-hand").innerHTML="Opponent Hand<br><b>7</b>";$("deck-pile").textContent="Deck Pile";$("discard-pile").textContent="Discard Pile";$("hand-row").innerHTML="";$("status-node").textContent="Status: Clear";$("turn-node").textContent="Player Turn";updateStats()}
+function showModal(kind,reason,payout,damage){let m=$("result-modal");if(!m){m=document.createElement("div");m.id="result-modal";m.className="modal";document.body.appendChild(m)}m.innerHTML=`<div class="modal-card ${kind==="DEFEAT"?"defeat":""}"><h2>${kind}</h2><p>${esc(reason)}</p><p>Total damage: <b>${damage}</b></p><p>Payout: <b class="money">${nz.format(payout)}</b></p><button onclick="$('result-modal').classList.remove('show')">Claim</button></div>`;m.classList.add("show")}
+function exportSave(){const s=btoa(unescape(encodeURIComponent(JSON.stringify({wallet,inventory,activeDeck}))));navigator.clipboard&&navigator.clipboard.writeText(s);prompt("Export Save",s)}function importSave(){const s=prompt("Paste Export Save");if(!s)return;try{const d=JSON.parse(decodeURIComponent(escape(atob(s))));wallet=d.wallet;inventory=d.inventory||[];activeDeck=d.activeDeck||[];saveGame();renderAll();log("Imported save profile.")}catch{log("Import failed: invalid save string.")}}
+function renderAll(){updateStats();renderBinder();renderMarket();if(match)paintBoard()}
+document.querySelectorAll(".tab").forEach(btn=>btn.addEventListener("click",()=>{document.querySelectorAll(".tab,.view").forEach(x=>x.classList.remove("active"));btn.classList.add("active");$(btn.dataset.view).classList.add("active")}));$("attack-btn").addEventListener("click",attack);$("coin-btn").addEventListener("click",flipCoin);$("concede-btn").addEventListener("click",()=>finish("DEFEAT","Match conceded.",0,match?match.totalDamage:0));$("export-btn").addEventListener("click",exportSave);$("import-btn").addEventListener("click",importSave);
+loadGame();renderPacks();renderTournaments();renderAll();setCardStage(null);log(`Boot complete. ${PACKS.length} historical NZD booster packs loaded.`);
