@@ -194,31 +194,120 @@ const ALL_PACKS = PACKS.flat();
 const TOTAL_SETS = ALL_PACKS.length;
 
 /* ====================================================
-   3. STARTER DECK (legal 60-card balance)
+   3. STARTER DECKS — 100% legal, competitively built (60 cards each)
    ==================================================== */
-function buildStarterDeck() {
+const DECK_TEMPLATES = {
+  // "Charizard ex" — a genuine top-tier Standard archetype (2023–24 format).
+  charizard: {
+    displayName: "Charizard ex",
+    realSetId: "sv3",
+    energyName: "Fire Energy",
+    list: [
+      ["Charmander", 4, 60, "basic"],
+      ["Charmeleon", 2, 90, "stage"],
+      ["Charizard ex", 3, 330, "stage"],
+      ["Pidgey", 2, 60, "basic"],
+      ["Pidgeotto", 2, 80, "stage"],
+      ["Radiant Charizard", 1, 160, "stage"],
+      ["Professor's Research", 4, 0, "trainer"],
+      ["Iono", 2, 0, "trainer"],
+      ["Boss's Orders", 2, 0, "trainer"],
+      ["Ultra Ball", 4, 0, "trainer"],
+      ["Nest Ball", 4, 0, "trainer"],
+      ["Rare Candy", 3, 0, "trainer"],
+      ["Battle VIP Pass", 3, 0, "trainer"],
+      ["Switch", 2, 0, "trainer"],
+      ["Super Rod", 2, 0, "trainer"],
+      ["Earthen Vessel", 2, 0, "trainer"],
+      ["Forest Seal Stone", 2, 0, "trainer"],
+      ["Technical Machine: Evolution", 2, 0, "trainer"],
+      ["Counter Catcher", 2, 0, "trainer"],
+      ["Fire Energy", 10, 0, "energy"],
+      ["Jet Energy", 2, 0, "energy"],
+    ]
+  },
+  // "Dragapult ex / Miraidon ex" — the other genuine top-tier Standard archetype
+  // from the same era, used for the AI opponent so matches feel like real games.
+  miraidon: {
+    displayName: "Miraidon ex",
+    realSetId: "sv1",
+    energyName: "Lightning Energy",
+    list: [
+      ["Miraidon ex", 3, 220, "basic"],
+      ["Dreepy", 3, 60, "basic"],
+      ["Drakloak", 2, 80, "stage"],
+      ["Dragapult ex", 3, 280, "stage"],
+      ["Bidoof", 2, 60, "basic"],
+      ["Bibarel", 1, 110, "stage"],
+      ["Professor's Research", 4, 0, "trainer"],
+      ["Iono", 2, 0, "trainer"],
+      ["Boss's Orders", 2, 0, "trainer"],
+      ["Ultra Ball", 4, 0, "trainer"],
+      ["Nest Ball", 4, 0, "trainer"],
+      ["Rare Candy", 3, 0, "trainer"],
+      ["Battle VIP Pass", 3, 0, "trainer"],
+      ["Switch", 2, 0, "trainer"],
+      ["Super Rod", 2, 0, "trainer"],
+      ["Earthen Vessel", 2, 0, "trainer"],
+      ["Counter Catcher", 2, 0, "trainer"],
+      ["Technical Machine: Evolution", 2, 0, "trainer"],
+      ["Lost Vacuum", 2, 0, "trainer"],
+      ["Lightning Energy", 10, 0, "energy"],
+      ["Psychic Energy", 2, 0, "energy"],
+    ]
+  }
+};
+
+// Sanity-check every template at load time: exactly 60 cards, max 4 non-energy copies.
+function auditDeckTemplate(t) {
+  const total = t.list.reduce((sum, [, count]) => sum + count, 0);
+  if (total !== 60) console.warn(`Deck template "${t.displayName}" has ${total} cards, expected 60.`);
+  t.list.forEach(([name, count, , flag]) => {
+    if (flag !== "energy" && count > 4) console.warn(`Deck template "${t.displayName}": ${name} has ${count} copies (max 4).`);
+  });
+}
+Object.values(DECK_TEMPLATES).forEach(auditDeckTemplate);
+
+async function buildDeckFromTemplate(template) {
+  const realPool = await fetchSetCards(template.realSetId);
   const deck = [];
-  const basics = [
-    { name: "Charmander", hp: 60, type: "Fire", flag: "basic" },
-    { name: "Squirtle", hp: 60, type: "Water", flag: "basic" },
-    { name: "Pidgey", hp: 50, type: "Colorless", flag: "basic" },
-    { name: "Machop", hp: 60, type: "Fighting", flag: "basic" },
-  ];
-  // 14 basic pokemon (non-sellable starter assets)
-  for (let i = 0; i < 14; i++) {
-    const b = basics[i % basics.length];
-    deck.push(card(`${b.name} #${i}`, "Base Starter Deck", 0, "Common", b));
-  }
-  // 22 energy
-  for (let i = 0; i < 22; i++) {
-    deck.push(card(`Basic Energy #${i}`, "Base Starter Deck", 0, "Energy", { type: "Energy", flag: "energy" }));
-  }
-  // 24 trainers
-  for (let i = 0; i < 24; i++) {
-    deck.push(card(`Trainer Item #${i}`, "Base Starter Deck", 0, "Trainer", { flag: "trainer" }));
-  }
-  deck.forEach(c => c.sellable = false);
+
+  template.list.forEach(([name, count, hp, flag]) => {
+    for (let i = 0; i < count; i++) {
+      let img = "";
+      let realHp = hp;
+
+      if (realPool) {
+        const match = realPool.find(rc => rc.name.toLowerCase() === name.toLowerCase())
+          || realPool.find(rc => rc.name.toLowerCase().includes(name.toLowerCase()));
+        if (match) {
+          img = (match.images && (match.images.large || match.images.small)) || "";
+          if (match.hp) realHp = parseInt(match.hp, 10) || hp;
+        }
+      }
+
+      const isPokemon = flag === "basic" || flag === "stage";
+      const c = card(
+        name,
+        `${template.displayName} Deck`,
+        0,
+        isPokemon ? "Pokémon" : (flag === "energy" ? "Energy" : "Trainer"),
+        { flag, img }
+      );
+      if (isPokemon) { c.hp = realHp; c.maxHp = realHp; }
+      c.sellable = false; // preset competitive decks aren't cash-out fodder
+      deck.push(c);
+    }
+  });
+
   return deck;
+}
+
+function buildStarterDeck() {
+  return buildDeckFromTemplate(DECK_TEMPLATES.charizard);
+}
+function buildOpponentDeck() {
+  return buildDeckFromTemplate(DECK_TEMPLATES.miraidon);
 }
 
 function card(name, set, value, rarity, extra) {
@@ -560,18 +649,17 @@ function sellCard(cardId) {
 /* ====================================================
    10. DECK MANAGEMENT
    ==================================================== */
-function getActiveDeck() {
+async function getActiveDeck() {
   if (activeDeck && activeDeck.length === 60) return activeDeck;
-  // gift starter
-  activeDeck = buildStarterDeck();
-  log("No legal deck found — Base Starter Deck granted to prevent lockout.", "event");
+  activeDeck = await buildStarterDeck();
+  log(`No legal deck found — granted a tournament-ready ${DECK_TEMPLATES.charizard.displayName} deck (60 cards, fully legal).`, "event");
   saveGame();
   return activeDeck;
 }
 
-function renderDeckSummary() {
-  const deck = getActiveDeck();
-  const pokemon = deck.filter(c => c.flag === "basic").length;
+async function renderDeckSummary() {
+  const deck = await getActiveDeck();
+  const pokemon = deck.filter(c => c.flag === "basic" || c.flag === "stage").length;
   const trainers = deck.filter(c => c.flag === "trainer").length;
   const energies = deck.filter(c => c.flag === "energy").length;
   document.getElementById("deck-count-pokemon").textContent = pokemon;
@@ -582,7 +670,7 @@ function renderDeckSummary() {
   const nameEl = document.getElementById("deck-name");
   const tagEl = document.getElementById("deck-legal-tag");
   if (nameEl && tagEl) {
-    nameEl.textContent = deck[0] && deck[0].set ? deck[0].set : "Base Starter Deck";
+    nameEl.textContent = deck[0] && deck[0].set ? deck[0].set : "Charizard ex Deck";
     const validation = validateDeck(deck);
     tagEl.textContent = validation.ok ? "Legal" : "Illegal";
     tagEl.classList.toggle("illegal", !validation.ok);
@@ -617,16 +705,19 @@ function renderTournamentList() {
   });
 }
 
+const BASIC_ENERGY_NAMES = new Set([
+  "Fire Energy", "Water Energy", "Grass Energy", "Lightning Energy",
+  "Psychic Energy", "Fighting Energy", "Darkness Energy", "Metal Energy",
+  "Fairy Energy", "Colorless Energy", "Basic Energy"
+]);
+
 function validateDeck(deck) {
-  if (deck.length !== 60) return { ok: false, reason: "Deck must contain exactly 60 cards." };
+  if (deck.length !== 60) return { ok: false, reason: `Deck must contain exactly 60 cards (has ${deck.length}).` };
   const counts = {};
-  deck.forEach(c => {
-    const key = c.name.replace(/\s#\d+$/, "");
-    counts[key] = (counts[key] || 0) + 1;
-  });
-  for (const k in counts) {
-    if (counts[k] > 4 && !/^Basic Energy/.test(k)) {
-      return { ok: false, reason: `Too many duplicates of ${k} (max 4).` };
+  deck.forEach(c => { counts[c.name] = (counts[c.name] || 0) + 1; });
+  for (const name in counts) {
+    if (counts[name] > 4 && !BASIC_ENERGY_NAMES.has(name)) {
+      return { ok: false, reason: `Too many duplicates of ${name} (max 4).` };
     }
   }
   return { ok: true };
@@ -638,7 +729,7 @@ function validateDeck(deck) {
 const EVENT_FEES = { ranked: 0, casual: 0, premier: 25.00, weekly: 8.00, showdown: 15.00 };
 const EVENT_REWARDS = { ranked: 8.00, casual: 0, premier: 65.00, weekly: 22.00, showdown: 40.00 };
 
-function startQueue(eventType) {
+async function startQueue(eventType) {
   const fee = EVENT_FEES[eventType] || 0;
   if (fee > 0) {
     if (wallet < fee) { log(`Cannot enter this event: insufficient funds for ${fmtMoney(fee)} entry.`, "warn"); return; }
@@ -647,12 +738,13 @@ function startQueue(eventType) {
     renderHeader();
   }
 
-  const deck = getActiveDeck();
+  const deck = await getActiveDeck();
   const validation = validateDeck(deck);
   if (!validation.ok) { log(`Deck illegal: ${validation.reason}`, "warn"); wallet += fee; renderHeader(); return; }
 
   log(`Matchmaking queue joined. Searching for opponent…`, "event");
-  showMatchFoundThen(() => setupMatch(eventType, deck));
+  const oppDeck = await buildOpponentDeck();
+  showMatchFoundThen(() => setupMatch(eventType, deck, oppDeck));
 }
 
 function showMatchFoundThen(callback) {
@@ -683,9 +775,9 @@ function shuffled(arr) {
   return a;
 }
 
-function setupMatch(eventType, deckCards) {
+function setupMatch(eventType, deckCards, oppDeckCards) {
   const playerDeck = shuffled(deckCards);
-  const oppDeck = shuffled(buildStarterDeck());
+  const oppDeck = shuffled(oppDeckCards);
 
   match = {
     eventType,
