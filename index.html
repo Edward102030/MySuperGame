@@ -159,55 +159,109 @@
           </div>
         </div>
 
-        <!-- PLAY MAT ARENA -->
-        <div id="match-arena" class="tcg-board hidden">
+        <!-- PLAY MAT ARENA — PTCGL 1:1 CLONE -->
+        <div id="match-arena" class="ptcgl-arena hidden">
 
-          <!-- LEFT COLUMN: PRIZES -->
-          <div class="mat-col mat-col-left">
-            <h4 class="mat-col-title">Prizes</h4>
-            <div id="p-prizes" class="prize-stack"></div>
+          <button class="arena-gear" title="Settings">⚙️</button>
+
+          <!-- Purple portal / vortex background sits behind everything -->
+          <div class="portal-bg"></div>
+
+          <!-- ===== OPPONENT ZONE (RED, TOP) ===== -->
+          <div class="zone opp-zone">
+            <div class="zone-curve opp-curve"></div>
+            <div class="zone-username" id="opp-username">TCGL_Chris</div>
+
+            <div class="hand-fan-top" id="opp-hand-fan">
+              <span class="hand-count-chip" id="opp-hand-count">0</span>
+            </div>
+
+            <div class="side-row opp-side-row">
+              <div class="prize-col">
+                <div class="prize-row" id="o-prizes"></div>
+                <span class="prize-count" id="o-prize-count">6</span>
+              </div>
+
+              <div class="bench-pill" id="o-bench-pill">
+                <div class="bench-slot" id="ob1"></div>
+                <div class="bench-slot" id="ob2"></div>
+                <div class="bench-slot" id="ob3"></div>
+                <div class="bench-slot" id="ob4"></div>
+                <div class="bench-slot" id="ob5"></div>
+              </div>
+
+              <div class="deck-discard-col">
+                <div class="deck-back opp-deck-back" id="o-deck"><span id="o-deck-count">60</span></div>
+                <div class="discard-slot" id="o-discard"><span class="discard-count" id="o-discard-count">0</span></div>
+              </div>
+            </div>
+
+            <div class="divider-arc opp-divider-arc"></div>
           </div>
 
-          <!-- CENTER COLUMN -->
-          <div class="mat-col mat-col-center">
-            <div class="active-row">
-              <div class="mat-zone active-zone" id="p-active">
-                <span class="zone-label">Active</span>
-              </div>
-              <div class="status-readout" id="active-status"></div>
-            </div>
-            <div class="bench-row">
-              <div class="mat-zone bench-zone" id="b1"><span class="zone-label">Bench</span></div>
-              <div class="mat-zone bench-zone" id="b2"><span class="zone-label">Bench</span></div>
-              <div class="mat-zone bench-zone" id="b3"><span class="zone-label">Bench</span></div>
-              <div class="mat-zone bench-zone" id="b4"><span class="zone-label">Bench</span></div>
-              <div class="mat-zone bench-zone" id="b5"><span class="zone-label">Bench</span></div>
-            </div>
+          <!-- ===== AVATAR HEXES ===== -->
+          <div class="avatar-hex opp-avatar"><div class="avatar-glyph">🧢</div></div>
+          <div class="avatar-hex player-avatar"><div class="avatar-glyph">👤</div><button class="chat-bubble-btn">💬</button></div>
 
-            <!-- CARD PREVIEW FRAME -->
+          <!-- ===== CENTER ACTIVE STAGE ===== -->
+          <div class="active-stage">
+            <div class="active-card-lg opp-active-lg" id="o-active"></div>
+            <div class="active-card-lg player-active-lg" id="p-active"></div>
+          </div>
+
+          <!-- ===== RIGHT TURN RAIL ===== -->
+          <div class="turn-rail">
+            <div class="rail-arrows">▲▼</div>
+            <div class="rail-gx">GX</div>
+            <div class="rail-timer" id="opp-timer">--:--</div>
+            <div class="rail-turn-count opp-turn-count" id="opp-turn-count">0</div>
+            <button class="rail-end-turn" id="btn-end-turn"><span>END</span><span>TURN</span></button>
+            <div class="rail-turn-count player-turn-count" id="player-turn-count">0</div>
+            <div class="rail-timer" id="player-timer">--:--</div>
+            <div class="rail-gx">GX</div>
+          </div>
+
+          <!-- ===== PLAYER ZONE (BLUE, BOTTOM) ===== -->
+          <div class="zone player-zone">
+            <div class="zone-curve player-curve"></div>
+            <div class="divider-arc player-divider-arc"></div>
+
+            <div class="side-row player-side-row">
+              <div class="prize-col">
+                <span class="prize-count" id="p-prize-count">6</span>
+                <div class="prize-row" id="p-prizes"></div>
+              </div>
+
+              <div class="bench-pill" id="p-bench-pill">
+                <div class="bench-slot" id="b1"></div>
+                <div class="bench-slot" id="b2"></div>
+                <div class="bench-slot" id="b3"></div>
+                <div class="bench-slot" id="b4"></div>
+                <div class="bench-slot" id="b5"></div>
+              </div>
+
+              <div class="deck-discard-col">
+                <div class="deck-back player-deck-back" id="p-deck"><span id="deck-count-label">60</span></div>
+                <div class="discard-slot" id="p-discard"><span class="discard-count" id="p-discard-count">0</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== CARD PREVIEW + CONTROLS (floats above the hand) ===== -->
+          <div class="mini-controls">
             <div class="card-preview-frame">
               <img id="card-render-img" alt="card preview" />
               <div id="card-meta">No card selected</div>
             </div>
+            <button class="btn-secondary" id="btn-flip-coin">🪙 Flip Coin</button>
+            <button class="btn-primary" id="btn-attack">⚔️ Attack</button>
+            <button class="btn-danger" id="btn-concede">🏳️ Concede</button>
           </div>
 
-          <!-- RIGHT COLUMN: DECK / DISCARD -->
-          <div class="mat-col mat-col-right">
-            <h4 class="mat-col-title">Deck</h4>
-            <div class="mat-zone deck-zone" id="p-deck"><span class="zone-label" id="deck-count-label">60</span></div>
-            <h4 class="mat-col-title">Discard</h4>
-            <div class="mat-zone discard-zone" id="p-discard"><span class="zone-label">0</span></div>
-          </div>
-
-          <!-- BOTTOM HAND ROW -->
-          <div class="hand-row-wrap">
-            <div class="hand-controls">
-              <button class="btn-secondary" id="btn-flip-coin">🪙 Flip Coin</button>
-              <button class="btn-primary" id="btn-attack">⚔️ Attack</button>
-              <button class="btn-danger" id="btn-concede">🏳️ Concede</button>
-              <button class="btn-secondary" id="btn-end-turn">End Turn</button>
-            </div>
-            <div id="hand-row" class="hand-row"></div>
+          <!-- ===== PLAYER HAND FAN (BOTTOM, REAL ART) ===== -->
+          <div class="hand-fan-bottom">
+            <span class="hand-count-chip hand-count-bottom" id="player-hand-count">0</span>
+            <div id="hand-row" class="hand-row-real"></div>
           </div>
         </div>
       </section>
