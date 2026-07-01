@@ -12,6 +12,7 @@
 let wallet = 100.00;
 let inventory = [];           // [{id, name, set, value, rarity, img, dupeKey}]
 let activeDeck = null;        // array of card refs (60) or null -> starter
+let activeDeckVersion = 0;    // schema version of activeDeck; forces rebuild when stale
 let trainerName = "Trainer";
 
 let stats = {
@@ -195,55 +196,68 @@ const TOTAL_SETS = ALL_PACKS.length;
 
 /* ====================================================
    3. STARTER DECKS — 100% legal, competitively built (60 cards each)
+   House rule: max 3 copies of any card, EXCEPT Energy (unlimited).
    ==================================================== */
 const DECK_TEMPLATES = {
-  // "Charizard ex" — a genuine top-tier Standard archetype (2023–24 format).
+  // "Charizard ex" — fire-forward Standard archetype. 2x Charizard ex + its
+  // full evolution line, a couple of Fire-type support Pokémon, a light
+  // Colorless splash for consistency, and a Champion/Tournament-flavoured
+  // Supporter lineup (Leon, Cynthia's Ambition, Iono, Boss's Orders).
   charizard: {
     displayName: "Charizard ex",
     realSetId: "sv3",
     energyName: "Fire Energy",
     list: [
-      ["Charmander", 4, 60, "basic"],
+      // ---- Pokémon (14) — mostly Fire, small splash ----
+      ["Charmander", 3, 60, "basic"],
       ["Charmeleon", 2, 90, "stage"],
-      ["Charizard ex", 3, 330, "stage"],
+      ["Charizard ex", 2, 330, "stage"],
+      ["Fletchling", 2, 50, "basic"],
+      ["Fletchinder", 2, 70, "stage"],
+      ["Talonflame", 1, 130, "stage"],
       ["Pidgey", 2, 60, "basic"],
-      ["Pidgeotto", 2, 80, "stage"],
-      ["Radiant Charizard", 1, 160, "stage"],
-      ["Professor's Research", 4, 0, "trainer"],
-      ["Iono", 2, 0, "trainer"],
+      // ---- Trainers (34) — items, tools, and Champion/Tournament Supporters ----
+      ["Professor's Research", 3, 0, "trainer"],
+      ["Iono", 3, 0, "trainer"],
       ["Boss's Orders", 2, 0, "trainer"],
-      ["Ultra Ball", 4, 0, "trainer"],
-      ["Nest Ball", 4, 0, "trainer"],
+      ["Leon", 1, 0, "trainer"],              // Champion Supporter
+      ["Cynthia's Ambition", 1, 0, "trainer"], // Champion Supporter
+      ["Ultra Ball", 3, 0, "trainer"],
+      ["Nest Ball", 3, 0, "trainer"],
       ["Rare Candy", 3, 0, "trainer"],
-      ["Battle VIP Pass", 3, 0, "trainer"],
+      ["Battle VIP Pass", 3, 0, "trainer"],   // Tournament-access Item
       ["Switch", 2, 0, "trainer"],
       ["Super Rod", 2, 0, "trainer"],
       ["Earthen Vessel", 2, 0, "trainer"],
       ["Forest Seal Stone", 2, 0, "trainer"],
       ["Technical Machine: Evolution", 2, 0, "trainer"],
       ["Counter Catcher", 2, 0, "trainer"],
+      // ---- Energy (12) — unlimited, mostly Fire ----
       ["Fire Energy", 10, 0, "energy"],
       ["Jet Energy", 2, 0, "energy"],
     ]
   },
-  // "Dragapult ex / Miraidon ex" — the other genuine top-tier Standard archetype
-  // from the same era, used for the AI opponent so matches feel like real games.
+  // "Dragapult ex / Miraidon ex" — the AI opponent's deck, built to the same
+  // house rules so every match is a fair, fully legal fight.
   miraidon: {
     displayName: "Miraidon ex",
     realSetId: "sv1",
     energyName: "Lightning Energy",
     list: [
-      ["Miraidon ex", 3, 220, "basic"],
       ["Dreepy", 3, 60, "basic"],
       ["Drakloak", 2, 80, "stage"],
-      ["Dragapult ex", 3, 280, "stage"],
+      ["Dragapult ex", 2, 280, "stage"],
+      ["Miraidon ex", 2, 220, "basic"],
+      ["Pawmi", 2, 50, "basic"],
       ["Bidoof", 2, 60, "basic"],
       ["Bibarel", 1, 110, "stage"],
-      ["Professor's Research", 4, 0, "trainer"],
-      ["Iono", 2, 0, "trainer"],
+      ["Professor's Research", 3, 0, "trainer"],
+      ["Iono", 3, 0, "trainer"],
       ["Boss's Orders", 2, 0, "trainer"],
-      ["Ultra Ball", 4, 0, "trainer"],
-      ["Nest Ball", 4, 0, "trainer"],
+      ["Leon", 1, 0, "trainer"],
+      ["Cynthia's Ambition", 1, 0, "trainer"],
+      ["Ultra Ball", 3, 0, "trainer"],
+      ["Nest Ball", 3, 0, "trainer"],
       ["Rare Candy", 3, 0, "trainer"],
       ["Battle VIP Pass", 3, 0, "trainer"],
       ["Switch", 2, 0, "trainer"],
@@ -258,12 +272,12 @@ const DECK_TEMPLATES = {
   }
 };
 
-// Sanity-check every template at load time: exactly 60 cards, max 4 non-energy copies.
+// Sanity-check every template at load time: exactly 60 cards, max 3 non-energy copies.
 function auditDeckTemplate(t) {
   const total = t.list.reduce((sum, [, count]) => sum + count, 0);
   if (total !== 60) console.warn(`Deck template "${t.displayName}" has ${total} cards, expected 60.`);
   t.list.forEach(([name, count, , flag]) => {
-    if (flag !== "energy" && count > 4) console.warn(`Deck template "${t.displayName}": ${name} has ${count} copies (max 4).`);
+    if (flag !== "energy" && count > 3) console.warn(`Deck template "${t.displayName}": ${name} has ${count} copies (max 3).`);
   });
 }
 Object.values(DECK_TEMPLATES).forEach(auditDeckTemplate);
@@ -364,9 +378,14 @@ function pickRealCard(pool, tier) {
    ==================================================== */
 const SAVE_KEY = "poketcgnz_save_v1";
 
+// TEMP: localStorage persistence is disabled for now — every load starts a
+// fresh session. Flip this back to `true` to restore save/load behavior.
+const PERSISTENCE_ENABLED = false;
+
 function saveGame() {
+  if (!PERSISTENCE_ENABLED) return;
   const payload = {
-    wallet, inventory, activeDeck, trainerName, stats
+    wallet, inventory, activeDeck, activeDeckVersion, trainerName, stats
   };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
@@ -376,6 +395,7 @@ function saveGame() {
 }
 
 function loadGame() {
+  if (!PERSISTENCE_ENABLED) { firstRun(); return; }
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) { firstRun(); return; }
@@ -383,6 +403,7 @@ function loadGame() {
     wallet = data.wallet ?? 100.00;
     inventory = data.inventory ?? [];
     activeDeck = data.activeDeck ?? null;
+    activeDeckVersion = data.activeDeckVersion ?? 0; // older saves default to 0 -> always stale -> auto-rebuilt
     trainerName = data.trainerName ?? "Trainer";
     stats = Object.assign({ wins: 0, losses: 0, streak: 0, bestStreak: 0, packsOpened: 0, totalEarnings: 0 }, data.stats || {});
   } catch (e) {
@@ -394,6 +415,7 @@ function firstRun() {
   wallet = 100.00;
   inventory = [];
   activeDeck = null;
+  activeDeckVersion = 0;
   trainerName = "Trainer";
   stats = { wins: 0, losses: 0, streak: 0, bestStreak: 0, packsOpened: 0, totalEarnings: 0 };
   log("New trainer profile initialized. Starter funds: $100.00 NZD.", "event");
@@ -649,10 +671,14 @@ function sellCard(cardId) {
 /* ====================================================
    10. DECK MANAGEMENT
    ==================================================== */
+const DECK_SCHEMA_VERSION = 3; // bump whenever DECK_TEMPLATES changes — invalidates old saves automatically
+
 async function getActiveDeck() {
-  if (activeDeck && activeDeck.length === 60) return activeDeck;
+  const stale = !activeDeck || activeDeck.length !== 60 || activeDeckVersion !== DECK_SCHEMA_VERSION || !validateDeck(activeDeck).ok;
+  if (!stale) return activeDeck;
   activeDeck = await buildStarterDeck();
-  log(`No legal deck found — granted a tournament-ready ${DECK_TEMPLATES.charizard.displayName} deck (60 cards, fully legal).`, "event");
+  activeDeckVersion = DECK_SCHEMA_VERSION;
+  log(`Granted a tournament-ready ${DECK_TEMPLATES.charizard.displayName} deck — 60 cards, 100% legal (max 3 copies per card, unlimited Energy).`, "event");
   saveGame();
   return activeDeck;
 }
@@ -705,19 +731,14 @@ function renderTournamentList() {
   });
 }
 
-const BASIC_ENERGY_NAMES = new Set([
-  "Fire Energy", "Water Energy", "Grass Energy", "Lightning Energy",
-  "Psychic Energy", "Fighting Energy", "Darkness Energy", "Metal Energy",
-  "Fairy Energy", "Colorless Energy", "Basic Energy"
-]);
-
 function validateDeck(deck) {
   if (deck.length !== 60) return { ok: false, reason: `Deck must contain exactly 60 cards (has ${deck.length}).` };
   const counts = {};
   deck.forEach(c => { counts[c.name] = (counts[c.name] || 0) + 1; });
-  for (const name in counts) {
-    if (counts[name] > 4 && !BASIC_ENERGY_NAMES.has(name)) {
-      return { ok: false, reason: `Too many duplicates of ${name} (max 4).` };
+  for (const c of deck) {
+    if (c.flag === "energy") continue; // Energy is unlimited under house rules
+    if (counts[c.name] > 3) {
+      return { ok: false, reason: `Too many duplicates of ${c.name} (max 3).` };
     }
   }
   return { ok: true };
