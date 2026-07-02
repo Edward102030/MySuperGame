@@ -368,6 +368,7 @@ button, select, input { font-family: inherit; }
   overflow: hidden;
   background: #05060c;
 }
+.hidden { display: none !important; }
 .ptcgl-arena.hidden { display: none; }
 
 /* ---- Purple portal / vortex backdrop ---- */
@@ -495,7 +496,7 @@ button, select, input { font-family: inherit; }
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative;
 }
-.bench-slot img { width: 100%; height: 100%; object-fit: cover; border-radius: 4px; }
+.bench-slot img { width: 100%; height: 100%; object-fit: contain; border-radius: 4px; background: #0a0c14; }
 .bench-slot .hp-pill {
   position: absolute; top: 2px; right: 2px;
   font-size: 7px; font-weight: 800; color: #fff;
@@ -519,7 +520,7 @@ button, select, input { font-family: inherit; }
   background: rgba(10,12,20,0.6); border: 1.5px dashed var(--danger);
   display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
-.discard-slot img { width: 100%; height: 100%; object-fit: cover; }
+.discard-slot img { width: 100%; height: 100%; object-fit: contain; background: #0a0c14; }
 .discard-count {
   position: absolute; bottom: 2px; right: 2px;
   font-size: 7px; font-weight: 800; color: #fff;
@@ -538,7 +539,7 @@ button, select, input { font-family: inherit; }
   display: flex; align-items: center; justify-content: center;
   pointer-events: auto; cursor: pointer;
 }
-.active-card-lg img { width: 100%; height: 100%; object-fit: cover; }
+.active-card-lg img { width: 100%; height: 100%; object-fit: contain; background: #0a0c14; }
 .opp-active-lg { margin-bottom: 1vh; border: 2px solid #ff5bd6; box-shadow: 0 0 16px rgba(255,91,214,0.5); }
 .player-active-lg { margin-top: 1vh; border: 2px solid var(--accent-cyan); box-shadow: 0 0 18px rgba(0,245,255,0.55); }
 .active-card-lg .hp-pill-lg {
@@ -548,6 +549,16 @@ button, select, input { font-family: inherit; }
   border-radius: 10px; padding: 2px 7px;
 }
 .active-card-lg .zone-label-empty { font-size: 9px; color: var(--text-secondary); text-align: center; }
+
+.mon-name-fallback {
+  position: absolute; inset: 0;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 4px;
+  font-size: 9px; font-weight: 700; color: #fff;
+  background: linear-gradient(145deg, rgba(40,50,70,0.9), rgba(15,20,30,0.9));
+  line-height: 1.25;
+}
+.mon-name-fallback-sm { font-size: 7px; padding: 2px; }
 
 /* ---- Right turn rail ---- */
 .turn-rail {
@@ -589,7 +600,7 @@ button, select, input { font-family: inherit; }
   display: flex; align-items: center; gap: 8px; max-width: 220px;
   background: transparent; border: none; padding: 0;
 }
-.mini-controls #card-render-img { width: 30px; height: 42px; object-fit: cover; border-radius: 4px; background: #111a28; }
+.mini-controls #card-render-img { width: 30px; height: 42px; object-fit: contain; border-radius: 4px; background: #111a28; }
 .mini-controls #card-meta { font-size: 9.5px; color: var(--text-secondary); max-width: 130px; }
 .mini-controls button { padding: 6px 10px; font-size: 10.5px; }
 
@@ -615,7 +626,7 @@ button, select, input { font-family: inherit; }
   font-size: 8.5px; color: var(--text-secondary); text-align: center; padding: 2px;
 }
 .hand-card-real:first-child { margin-left: 0; }
-.hand-card-real img { width: 100%; height: 100%; object-fit: cover; }
+.hand-card-real img { width: 100%; height: 100%; object-fit: contain; background: #0a0c14; }
 .hand-card-real:hover {
   transform: translateY(-20px) scale(1.08) translateZ(0) !important;
   border-color: var(--accent-cyan); box-shadow: 0 8px 20px rgba(0,0,0,0.5); z-index: 20;
@@ -629,6 +640,35 @@ button, select, input { font-family: inherit; }
   text-shadow: 0 0 14px rgba(0,245,255,0.5);
   margin: 16px 0 4px;
 }
+
+/* ================= DECK SELECT MODAL ================= */
+.deck-select-box { width: 720px; max-width: 92vw; }
+.deck-select-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 16px 0 4px;
+}
+.deck-option-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  transform: translateZ(0);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.deck-option-card:hover { transform: translateY(-3px) translateZ(0); border-color: var(--border-glass-strong); }
+.deck-option-icon { font-size: 30px; }
+.deck-option-type { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent-hextech); }
+.deck-option-name { font-size: 15px; font-weight: 800; }
+.deck-option-subtitle { font-size: 10.5px; color: var(--text-secondary); margin-bottom: 4px; }
+.deck-option-blurb { font-size: 11px; color: var(--text-secondary); flex: 1; line-height: 1.4; }
+.deck-option-btn { width: 100%; margin-top: 8px; }
 
 
 
@@ -673,10 +713,11 @@ button, select, input { font-family: inherit; }
 .pack-buy-btn { margin-top: 4px; width: 100%; }
 
 .binder-card-img { height: 90px; border-radius: 8px; background: var(--zone-bg); display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.binder-card-img img { width: 100%; height: 100%; object-fit: cover; }
+.binder-card-img img { width: 100%; height: 100%; object-fit: contain; background: #0a0c14; }
 .binder-card-name { font-size: 12px; font-weight: 700; }
 .binder-card-set { font-size: 10px; color: var(--text-secondary); }
 .binder-card-value { font-size: 13px; font-weight: 700; color: var(--currency-green); }
+.binder-card-date { font-size: 9.5px; color: var(--text-secondary); opacity: 0.8; }
 .binder-rarity-tag {
   align-self: flex-start;
   font-size: 8px;
@@ -723,27 +764,79 @@ button, select, input { font-family: inherit; }
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
-.pack-open-box { width: 560px; }
-.pack-open-results { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 14px 0; }
-.pulled-card {
-  background: var(--zone-bg);
-  border-radius: 8px;
-  border: 1px solid var(--border-glass);
-  padding: 6px;
+.pack-open-box { width: 420px; text-align: center; }
+
+.pack-reveal-stage {
+  position: relative;
+  height: 300px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
   align-items: center;
-  text-align: center;
-  font-size: 9.5px;
-  animation: pullIn 0.35s ease;
+  justify-content: center;
+  gap: 8px;
+  margin: 14px 0 10px;
 }
-.pulled-card.rarity-secret { border-color: #ff6bd5; box-shadow: 0 0 10px rgba(255,107,213,0.4); }
-.pulled-card.rarity-ultra { border-color: var(--accent-cyan); box-shadow: 0 0 8px rgba(0,245,255,0.3); }
-.pulled-card.rarity-holo { border-color: var(--blue); }
-@keyframes pullIn { from { opacity: 0; transform: scale(0.7) translateZ(0); } to { opacity: 1; transform: scale(1) translateZ(0); } }
-.pulled-card img { width: 100%; border-radius: 4px; aspect-ratio: 5/7; object-fit: cover; background: #0c121d; }
-.pulled-card-value { color: var(--currency-green); font-weight: 700; }
+.reveal-card {
+  position: relative;
+  width: 160px;
+  height: 224px;
+  background: #0a0c14;
+  border-radius: 10px;
+  border: 2px solid var(--border-glass-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.5);
+  animation: cardFlipIn 0.28s ease;
+  transform-style: preserve-3d;
+}
+.reveal-card img { width: 100%; height: 100%; object-fit: contain; border-radius: 8px; }
+.reveal-card-caption { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 44px; }
+.reveal-card-name { font-size: 12px; font-weight: 700; color: #fff; }
+.reveal-card-rarity { font-size: 9.5px; color: var(--text-secondary); }
+.reveal-card-value { font-size: 12px; font-weight: 800; color: var(--currency-green); }
+.reveal-card.rarity-secret { border-color: #ff6bd5; box-shadow: 0 0 20px rgba(255,107,213,0.55); }
+.reveal-card.rarity-ultra { border-color: var(--accent-cyan); box-shadow: 0 0 18px rgba(0,245,255,0.45); }
+.reveal-card.rarity-holo { border-color: var(--blue); box-shadow: 0 0 14px rgba(61,133,198,0.4); }
+.reveal-hit-badge {
+  position: absolute; top: -8px; right: -8px; z-index: 3;
+  background: linear-gradient(135deg, #ffd166, #ff8c42);
+  color: #1a1006; font-size: 9px; font-weight: 800;
+  padding: 2px 6px; border-radius: 5px; letter-spacing: 0.3px;
+  box-shadow: 0 0 10px rgba(255,209,102,0.6);
+}
+@keyframes cardFlipIn {
+  from { opacity: 0; transform: rotateY(90deg) scale(0.9); }
+  to { opacity: 1; transform: rotateY(0deg) scale(1); }
+}
+.reveal-card-exit {
+  animation: cardFlyOut 0.22s ease forwards;
+  pointer-events: none;
+}
+@keyframes cardFlyOut {
+  to { opacity: 0; transform: translateY(-40px) scale(0.8) rotate(-8deg); }
+}
+.reveal-stack-behind {
+  font-size: 10px; letter-spacing: -6px; color: rgba(255,255,255,0.15);
+  max-width: 60px; overflow: hidden; white-space: nowrap;
+}
+.pack-reveal-done {
+  font-size: 16px; font-weight: 800; color: var(--accent-cyan);
+  padding: 40px 0;
+}
+
+.pack-open-collected {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+  min-height: 30px; margin-bottom: 6px;
+}
+.collected-thumb {
+  width: 26px; height: 36px; border-radius: 4px; overflow: hidden;
+  background: var(--zone-bg); border: 1px solid var(--border-glass);
+  animation: pullIn 0.25s ease;
+}
+.collected-thumb img { width: 100%; height: 100%; object-fit: contain; background: #0a0c14; }
+@keyframes pullIn { from { opacity: 0; transform: scale(0.6) translateZ(0); } to { opacity: 1; transform: scale(1) translateZ(0); } }
 
 @media (max-width: 1366px) {
   .home-grid { grid-template-columns: 1fr; }
