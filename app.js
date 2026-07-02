@@ -13,6 +13,7 @@ let wallet = 100.00;
 let inventory = [];           // [{id, name, set, value, rarity, img, dupeKey}]
 let activeDeck = null;        // array of card refs (60) or null -> starter
 let activeDeckVersion = 0;    // schema version of activeDeck; forces rebuild when stale
+let activeDeckKey = null;     // which of the 3 selectable decks the player has chosen
 let trainerName = "Trainer";
 
 let stats = {
@@ -196,68 +197,145 @@ const TOTAL_SETS = ALL_PACKS.length;
 
 /* ====================================================
    3. STARTER DECKS — 100% legal, competitively built (60 cards each)
-   House rule: max 3 copies of any card, EXCEPT Energy (unlimited).
+   Official rule: max 4 copies of any card, EXCEPT basic Energy (unlimited).
+   Three selectable player archetypes (Fire / Grass / Water) plus a
+   separate AI opponent deck.
    ==================================================== */
 const DECK_TEMPLATES = {
-  // "Charizard ex" — fire-forward Standard archetype. 2x Charizard ex + its
-  // full evolution line, a couple of Fire-type support Pokémon, a light
-  // Colorless splash for consistency, and a Champion/Tournament-flavoured
-  // Supporter lineup (Leon, Cynthia's Ambition, Iono, Boss's Orders).
+  // ---- FIRE: "Charizard ex" — The Championship Standard ----
   charizard: {
+    key: "charizard",
     displayName: "Charizard ex",
+    subtitle: "The Championship Standard",
+    typeLabel: "Fire",
+    icon: "🔥",
+    blurb: "Pidgeot ex digs for anything you need, Dusknoir turns knockouts into prize swings, and Charizard ex closes games fast.",
     realSetId: "sv3",
-    energyName: "Fire Energy",
     list: [
-      // ---- Pokémon (14) — mostly Fire, small splash ----
+      // ---- Pokémon (18) ----
       ["Charmander", 3, 60, "basic"],
-      ["Charmeleon", 2, 90, "stage"],
-      ["Charizard ex", 2, 330, "stage"],
-      ["Fletchling", 2, 50, "basic"],
-      ["Fletchinder", 2, 70, "stage"],
-      ["Talonflame", 1, 130, "stage"],
+      ["Charmeleon", 1, 90, "stage", "Charmander"],
+      ["Charizard ex", 3, 330, "stage", "Charmeleon", "Charmander"],
       ["Pidgey", 2, 60, "basic"],
-      // ---- Trainers (34) — items, tools, and Champion/Tournament Supporters ----
-      ["Professor's Research", 3, 0, "trainer"],
-      ["Iono", 3, 0, "trainer"],
-      ["Boss's Orders", 2, 0, "trainer"],
-      ["Leon", 1, 0, "trainer"],              // Champion Supporter
-      ["Cynthia's Ambition", 1, 0, "trainer"], // Champion Supporter
-      ["Ultra Ball", 3, 0, "trainer"],
-      ["Nest Ball", 3, 0, "trainer"],
-      ["Rare Candy", 3, 0, "trainer"],
-      ["Battle VIP Pass", 3, 0, "trainer"],   // Tournament-access Item
-      ["Switch", 2, 0, "trainer"],
+      ["Pidgeot ex", 2, 260, "stage", "Pidgeotto", "Pidgey"],
+      ["Duskull", 2, 50, "basic"],
+      ["Dusclops", 1, 80, "stage", "Duskull"],
+      ["Dusknoir", 1, 120, "stage", "Dusclops", "Duskull"],
+      ["Rotom V", 2, 140, "basic"],
+      ["Radiant Charizard", 1, 160, "stage", "Charmeleon"],
+      // ---- Trainers (36) ----
+      ["Buddy-Buddy Poffin", 4, 0, "trainer"],
+      ["Ultra Ball", 4, 0, "trainer"],
+      ["Nest Ball", 4, 0, "trainer"],
+      ["Rare Candy", 4, 0, "trainer"],
       ["Super Rod", 2, 0, "trainer"],
       ["Earthen Vessel", 2, 0, "trainer"],
-      ["Forest Seal Stone", 2, 0, "trainer"],
-      ["Technical Machine: Evolution", 2, 0, "trainer"],
+      ["Prime Catcher", 1, 0, "trainer"],       // ACE SPEC
+      ["Arven", 4, 0, "trainer"],
+      ["Iono", 3, 0, "trainer"],
+      ["Professor's Research", 2, 0, "trainer"],
+      ["Boss's Orders", 2, 0, "trainer"],
+      ["Collapse Stadium", 1, 0, "trainer"],
       ["Counter Catcher", 2, 0, "trainer"],
-      // ---- Energy (12) — unlimited, mostly Fire ----
-      ["Fire Energy", 10, 0, "energy"],
-      ["Jet Energy", 2, 0, "energy"],
+      ["Night Stretcher", 1, 0, "trainer"],
+      // ---- Energy (6) — Charizard ex accelerates Fire from the deck ----
+      ["Fire Energy", 6, 0, "energy"],
     ]
   },
-  // "Dragapult ex / Miraidon ex" — the AI opponent's deck, built to the same
-  // house rules so every match is a fair, fully legal fight.
+
+  // ---- GRASS: "Venusaur ex" — The Healing Tank ----
+  venusaur: {
+    key: "venusaur",
+    displayName: "Venusaur ex",
+    subtitle: "The Healing Tank",
+    typeLabel: "Grass",
+    icon: "🌿",
+    blurb: "Teal Mask Ogerpon ex fuels the energy engine while Venusaur ex out-heals almost anything thrown at it.",
+    realSetId: "sv6",
+    list: [
+      // ---- Pokémon (16) ----
+      ["Bulbasaur", 3, 70, "basic"],
+      ["Ivysaur", 1, 100, "stage", "Bulbasaur"],
+      ["Venusaur ex", 3, 340, "stage", "Ivysaur", "Bulbasaur"],
+      ["Teal Mask Ogerpon ex", 3, 220, "basic"],
+      ["Cleffa", 3, 40, "basic"],
+      ["Radiant Greninja", 1, 130, "stage", "Frogadier", "Froakie"],  // Radiant rule: only 1 per deck
+      ["Fezandipiti ex", 2, 210, "basic"],
+      // ---- Trainers (34) ----
+      ["Bug Catching Set", 4, 0, "trainer"],
+      ["Ultra Ball", 4, 0, "trainer"],
+      ["Nest Ball", 3, 0, "trainer"],
+      ["Rare Candy", 3, 0, "trainer"],
+      ["Energy Switch", 3, 0, "trainer"],
+      ["Night Stretcher", 2, 0, "trainer"],
+      ["Brave Charm", 1, 0, "trainer"],        // ACE SPEC
+      ["Arven", 4, 0, "trainer"],
+      ["Iono", 4, 0, "trainer"],
+      ["Boss's Orders", 2, 0, "trainer"],
+      ["Gardenia's Vigor", 4, 0, "trainer"],   // Stadium
+      // ---- Energy (10) ----
+      ["Grass Energy", 10, 0, "energy"],
+    ]
+  },
+
+  // ---- WATER: "Blastoise ex" — The Heavy Rain Raindance ----
+  blastoise: {
+    key: "blastoise",
+    displayName: "Blastoise ex",
+    subtitle: "The Heavy Rain Raindance",
+    typeLabel: "Water",
+    icon: "💧",
+    blurb: "Discard fistfuls of Water Energy for huge damage, then Superior Energy Retrieval brings it all right back.",
+    realSetId: "sv1",
+    list: [
+      // ---- Pokémon (15) ----
+      ["Squirtle", 3, 60, "basic"],
+      ["Wartortle", 1, 90, "stage", "Squirtle"],
+      ["Blastoise ex", 3, 340, "stage", "Wartortle", "Squirtle"],
+      ["Origin Forme Palkia V", 2, 220, "basic"],
+      ["Origin Forme Palkia VSTAR", 2, 280, "stage", "Origin Forme Palkia V"],
+      ["Radiant Greninja", 1, 130, "stage", "Frogadier", "Froakie"],  // Radiant rule: only 1 per deck
+      ["Manaphy", 1, 70, "basic"],
+      ["Fezandipiti ex", 2, 210, "basic"],
+      // ---- Trainers (35) ----
+      ["Buddy-Buddy Poffin", 4, 0, "trainer"],
+      ["Ultra Ball", 4, 0, "trainer"],
+      ["Nest Ball", 2, 0, "trainer"],
+      ["Rare Candy", 3, 0, "trainer"],
+      ["Superior Energy Retrieval", 4, 0, "trainer"],
+      ["Earthen Vessel", 2, 0, "trainer"],
+      ["Super Rod", 1, 0, "trainer"],
+      ["Prime Catcher", 1, 0, "trainer"],      // ACE SPEC
+      ["Irida", 4, 0, "trainer"],
+      ["Iono", 4, 0, "trainer"],
+      ["Professor's Research", 2, 0, "trainer"],
+      ["Boss's Orders", 2, 0, "trainer"],
+      ["Jamming Tower", 2, 0, "trainer"],      // Stadium
+      // ---- Energy (10) ----
+      ["Water Energy", 10, 0, "energy"],
+    ]
+  },
+
+  // ---- AI OPPONENT DECK — separate pool, same house rules ----
   miraidon: {
+    key: "miraidon",
     displayName: "Miraidon ex",
     realSetId: "sv1",
-    energyName: "Lightning Energy",
     list: [
       ["Dreepy", 3, 60, "basic"],
-      ["Drakloak", 2, 80, "stage"],
-      ["Dragapult ex", 2, 280, "stage"],
+      ["Drakloak", 2, 80, "stage", "Dreepy"],
+      ["Dragapult ex", 2, 280, "stage", "Drakloak", "Dreepy"],
       ["Miraidon ex", 2, 220, "basic"],
       ["Pawmi", 2, 50, "basic"],
       ["Bidoof", 2, 60, "basic"],
-      ["Bibarel", 1, 110, "stage"],
+      ["Bibarel", 1, 110, "stage", "Bidoof"],
       ["Professor's Research", 3, 0, "trainer"],
       ["Iono", 3, 0, "trainer"],
       ["Boss's Orders", 2, 0, "trainer"],
       ["Leon", 1, 0, "trainer"],
       ["Cynthia's Ambition", 1, 0, "trainer"],
-      ["Ultra Ball", 3, 0, "trainer"],
-      ["Nest Ball", 3, 0, "trainer"],
+      ["Ultra Ball", 4, 0, "trainer"],
+      ["Nest Ball", 4, 0, "trainer"],
       ["Rare Candy", 3, 0, "trainer"],
       ["Battle VIP Pass", 3, 0, "trainer"],
       ["Switch", 2, 0, "trainer"],
@@ -265,19 +343,21 @@ const DECK_TEMPLATES = {
       ["Earthen Vessel", 2, 0, "trainer"],
       ["Counter Catcher", 2, 0, "trainer"],
       ["Technical Machine: Evolution", 2, 0, "trainer"],
-      ["Lost Vacuum", 2, 0, "trainer"],
       ["Lightning Energy", 10, 0, "energy"],
       ["Psychic Energy", 2, 0, "energy"],
     ]
   }
 };
 
-// Sanity-check every template at load time: exactly 60 cards, max 3 non-energy copies.
+// The 3 decks a player may choose as their starter (excludes the AI-only deck).
+const SELECTABLE_DECK_KEYS = ["charizard", "venusaur", "blastoise"];
+
+// Sanity-check every template at load time: exactly 60 cards, max 4 non-energy copies.
 function auditDeckTemplate(t) {
   const total = t.list.reduce((sum, [, count]) => sum + count, 0);
   if (total !== 60) console.warn(`Deck template "${t.displayName}" has ${total} cards, expected 60.`);
   t.list.forEach(([name, count, , flag]) => {
-    if (flag !== "energy" && count > 3) console.warn(`Deck template "${t.displayName}": ${name} has ${count} copies (max 3).`);
+    if (flag !== "energy" && count > 4) console.warn(`Deck template "${t.displayName}": ${name} has ${count} copies (max 4).`);
   });
 }
 Object.values(DECK_TEMPLATES).forEach(auditDeckTemplate);
@@ -286,42 +366,88 @@ async function buildDeckFromTemplate(template) {
   const realPool = await fetchSetCards(template.realSetId);
   const deck = [];
 
-  template.list.forEach(([name, count, hp, flag]) => {
+  for (const [name, count, hp, flag, evolvesFrom, rareCandyFrom] of template.list) {
+    const isPokemon = flag === "basic" || flag === "stage";
+    const match = await resolveRealCard(name, realPool, isPokemon);
+    let img = "";
+    let realHp = hp;
+    if (match) {
+      img = (match.images && (match.images.large || match.images.small)) || "";
+      const parsedHp = match.hp ? parseInt(match.hp, 10) : NaN;
+      if (isPokemon && !isNaN(parsedHp) && parsedHp >= 30) realHp = parsedHp; // sanity clamp
+    }
+
     for (let i = 0; i < count; i++) {
-      let img = "";
-      let realHp = hp;
-
-      if (realPool) {
-        const match = realPool.find(rc => rc.name.toLowerCase() === name.toLowerCase())
-          || realPool.find(rc => rc.name.toLowerCase().includes(name.toLowerCase()));
-        if (match) {
-          img = (match.images && (match.images.large || match.images.small)) || "";
-          if (match.hp) realHp = parseInt(match.hp, 10) || hp;
-        }
-      }
-
-      const isPokemon = flag === "basic" || flag === "stage";
       const c = card(
         name,
         `${template.displayName} Deck`,
-        0,
+        estimateStarterCardValue(flag),
         isPokemon ? "Pokémon" : (flag === "energy" ? "Energy" : "Trainer"),
-        { flag, img }
+        { flag, img, evolvesFrom: evolvesFrom || null, rareCandyFrom: rareCandyFrom || null }
       );
       if (isPokemon) { c.hp = realHp; c.maxHp = realHp; }
       c.sellable = false; // preset competitive decks aren't cash-out fodder
       deck.push(c);
     }
-  });
+  }
 
   return deck;
 }
 
 function buildStarterDeck() {
-  return buildDeckFromTemplate(DECK_TEMPLATES.charizard);
+  const key = SELECTABLE_DECK_KEYS.includes(activeDeckKey) ? activeDeckKey : "charizard";
+  return buildDeckFromTemplate(DECK_TEMPLATES[key]);
 }
 function buildOpponentDeck() {
   return buildDeckFromTemplate(DECK_TEMPLATES.miraidon);
+}
+
+// Seeds the Binder with one copy of every unique card across all 3 selectable
+// starter decks (Charizard ex / Venusaur ex / Blastoise ex combined), so the
+// full card pool is visible and collectible from the very start. Values are
+// capped modestly (see estimateStarterCardValue) — these are starter
+// collectibles, not chase cards.
+let starterBinderPopulated = false;
+async function populateStarterBinder() {
+  if (starterBinderPopulated) return;
+  starterBinderPopulated = true;
+
+  const seenNames = new Set();
+  for (const key of SELECTABLE_DECK_KEYS) {
+    const template = DECK_TEMPLATES[key];
+    const realPool = await fetchSetCards(template.realSetId);
+
+    for (const [name, , hp, flag, evolvesFrom, rareCandyFrom] of template.list) {
+      if (seenNames.has(name)) continue;
+      seenNames.add(name);
+
+      const isPokemon = flag === "basic" || flag === "stage";
+      const match = await resolveRealCard(name, realPool, isPokemon);
+      let img = "";
+      let realHp = hp;
+      if (match) {
+        img = (match.images && (match.images.large || match.images.small)) || "";
+        const parsedHp = match.hp ? parseInt(match.hp, 10) : NaN;
+        if (isPokemon && !isNaN(parsedHp) && parsedHp >= 30) realHp = parsedHp;
+      }
+
+      const c = card(
+        name,
+        `${template.displayName} Deck`,
+        estimateStarterCardValue(flag),
+        isPokemon ? "Pokémon" : (flag === "energy" ? "Energy" : "Trainer"),
+        { flag, img, evolvesFrom: evolvesFrom || null, rareCandyFrom: rareCandyFrom || null }
+      );
+      if (isPokemon) { c.hp = realHp; c.maxHp = realHp; }
+      inventory.push(c);
+    }
+  }
+
+  renderHeader();
+  renderHome();
+  renderBinder();
+  saveGame();
+  log(`Binder seeded with ${seenNames.size} unique starter cards from all 3 archetypes.`, "event");
 }
 
 function card(name, set, value, rarity, extra) {
@@ -329,10 +455,22 @@ function card(name, set, value, rarity, extra) {
     id: cryptoId(),
     name, set, value, rarity,
     img: "",
-    sellable: true
+    sellable: true,
+    dateAcquired: new Date().toISOString()
   }, extra || {});
 }
 function cryptoId() { return "c" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
+
+// Starter-deck cards are collectibles, not chase cards — cap value at $2 NZD.
+const STARTER_CARD_VALUE_CAP = 2.00;
+function estimateStarterCardValue(flag) {
+  let base;
+  if (flag === "energy") base = 0.05 + Math.random() * 0.15;          // $0.05–$0.20
+  else if (flag === "basic") base = 0.20 + Math.random() * 0.60;      // $0.20–$0.80
+  else if (flag === "stage") base = 0.60 + Math.random() * 1.40;      // $0.60–$2.00
+  else base = 0.15 + Math.random() * 0.85;                            // trainers: $0.15–$1.00
+  return Math.min(STARTER_CARD_VALUE_CAP, round2(base));
+}
 
 /* ---- LIVE CARD DATA (real Pokémon TCG API — images + names) ---- */
 const CARD_CACHE = {}; // realSetId -> array of real card objects, or null if fetch failed
@@ -352,6 +490,41 @@ async function fetchSetCards(realSetId) {
   return CARD_CACHE[realSetId];
 }
 
+// Fallback for deck cards that don't exist in their deck's "themed" set
+// (e.g. Rotom V isn't in Obsidian Flames) — searches the ENTIRE live card
+// database by exact name so evolution-line and support cards still get real
+// art + accurate HP. Cached per name so repeats (across decks) are free.
+const CARD_NAME_CACHE = {};
+async function fetchCardByName(name) {
+  if (CARD_NAME_CACHE.hasOwnProperty(name)) return CARD_NAME_CACHE[name];
+  try {
+    const res = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(name)}"&orderBy=-set.releaseDate&pageSize=1`);
+    if (!res.ok) throw new Error("API responded with " + res.status);
+    const json = await res.json();
+    CARD_NAME_CACHE[name] = (json.data && json.data[0]) || null;
+  } catch (e) {
+    CARD_NAME_CACHE[name] = null;
+  }
+  return CARD_NAME_CACHE[name];
+}
+
+// Finds the best real match for a deck-list card: exact name in the deck's
+// own set first, then an exact-name search across the whole database.
+// STRICTLY requires supertype "Pokémon" for HP to ever be trusted, so a
+// stray Trainer/Energy card can never leak a bogus HP value onto a Pokémon.
+async function resolveRealCard(name, setPool, isPokemon) {
+  let match = null;
+  if (setPool) {
+    match = setPool.find(rc => rc.name.toLowerCase() === name.toLowerCase()) || null;
+    if (isPokemon && match && match.supertype !== "Pokémon") match = null;
+  }
+  if (!match) {
+    const byName = await fetchCardByName(name);
+    if (byName && (!isPokemon || byName.supertype === "Pokémon")) match = byName;
+  }
+  return match;
+}
+
 // Buckets a real card's official rarity string into our gacha tiers.
 function rarityTier(apiRarity) {
   if (!apiRarity) return "common";
@@ -359,6 +532,7 @@ function rarityTier(apiRarity) {
   if (r.includes("secret") || r.includes("rainbow") || r.includes("gold") || r.includes("hyper")) return "secret";
   if (r.includes("ultra") || /\b(ex|gx|v|vmax|vstar|lv\.x|prime|legend|star)\b/.test(r)) return "ultra";
   if (r.includes("holo") || r.includes("rare")) return "holo";
+  if (r.includes("uncommon")) return "uncommon";
   return "common";
 }
 
@@ -369,6 +543,8 @@ function pickRealCard(pool, tier) {
   let candidates = byTier(tier);
   if (!candidates.length && tier === "secret") candidates = byTier("ultra");
   if (!candidates.length && (tier === "secret" || tier === "ultra")) candidates = byTier("holo");
+  if (!candidates.length && tier === "uncommon") candidates = byTier("common");
+  if (!candidates.length && tier === "common") candidates = byTier("uncommon");
   if (!candidates.length) candidates = pool;
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
@@ -385,7 +561,7 @@ const PERSISTENCE_ENABLED = false;
 function saveGame() {
   if (!PERSISTENCE_ENABLED) return;
   const payload = {
-    wallet, inventory, activeDeck, activeDeckVersion, trainerName, stats
+    wallet, inventory, activeDeck, activeDeckVersion, activeDeckKey, trainerName, stats
   };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
@@ -404,6 +580,7 @@ function loadGame() {
     inventory = data.inventory ?? [];
     activeDeck = data.activeDeck ?? null;
     activeDeckVersion = data.activeDeckVersion ?? 0; // older saves default to 0 -> always stale -> auto-rebuilt
+    activeDeckKey = data.activeDeckKey ?? null;
     trainerName = data.trainerName ?? "Trainer";
     stats = Object.assign({ wins: 0, losses: 0, streak: 0, bestStreak: 0, packsOpened: 0, totalEarnings: 0 }, data.stats || {});
   } catch (e) {
@@ -416,10 +593,13 @@ function firstRun() {
   inventory = [];
   activeDeck = null;
   activeDeckVersion = 0;
+  activeDeckKey = null;
   trainerName = "Trainer";
   stats = { wins: 0, losses: 0, streak: 0, bestStreak: 0, packsOpened: 0, totalEarnings: 0 };
+  starterBinderPopulated = false;
   log("New trainer profile initialized. Starter funds: $100.00 NZD.", "event");
   saveGame();
+  populateStarterBinder();
 }
 
 /* ====================================================
@@ -509,84 +689,160 @@ async function buyPack(packId) {
   log(`Purchased ${pack.name} for ${fmtMoney(pack.price)}.`, "money");
   renderHeader();
   saveGame();
-
-  document.getElementById("pack-open-title").textContent = `Opening ${pack.name}…`;
-  document.getElementById("pack-open-results").innerHTML = `<div class="empty-state" style="grid-column:1/-1;">Pulling cards from the live card database…</div>`;
-  document.getElementById("pack-open-modal").classList.remove("hidden");
-
-  const pulled = await openPack(pack);
   stats.packsOpened++;
-  pulled.forEach(c => inventory.push(c));
-  renderHeader();
-  renderHome();
-  saveGame();
-  showPackOpenModal(pack, pulled);
+
+  const { cards, isGodPack } = await openPack(pack);
+  startPackRevealSequence(pack, cards, isGodPack);
 }
 
+// ---- Official-ish pull odds ----
+// The 9 "normal" slots pull from Common/Uncommon real cards.
+const NORMAL_SLOT_ODDS = { common: 0.65, uncommon: 0.35 };
+// The 10th card (the "hit", second-to-last overall) follows real published-style odds.
+const HIT_SLOT_ODDS = { holo: 0.55, ultra: 0.35, secret: 0.10 };
+// Extremely rare "god pack": every non-Energy card is a hit.
+const GOD_PACK_CHANCE = 1 / 1500;
+
+function weightedTierPick(weights) {
+  const roll = Math.random();
+  let cumulative = 0;
+  for (const tier in weights) {
+    cumulative += weights[tier];
+    if (roll < cumulative) return tier;
+  }
+  return Object.keys(weights)[0];
+}
+
+function tierRarityLabel(tier) {
+  if (tier === "secret") return "Secret Rare";
+  if (tier === "ultra") return "Ultra Rare";
+  if (tier === "holo") return "Holo Rare";
+  if (tier === "uncommon") return "Uncommon";
+  return "Common";
+}
+
+// Builds one real-feeling booster: 11 cards total — 9 ordinary cards, then
+// the "hit" (2nd-to-last), then a basic Energy card (last). No code card.
 async function openPack(pack) {
   const realPool = await fetchSetCards(pack.realSetId);
-  const results = [];
-  const slots = 10;
-  for (let i = 0; i < slots; i++) {
-    const roll = Math.random() * 100;
-    let rarity, tier;
-    if (roll < 1) { rarity = "Secret Rare"; tier = "secret"; }
-    else if (roll < 7) { rarity = "Ultra Rare"; tier = "ultra"; }
-    else if (roll < 25) { rarity = "Holo Rare"; tier = "holo"; }
-    else { rarity = "Common/Uncommon"; tier = "common"; }
+  const isGodPack = Math.random() < GOD_PACK_CHANCE;
+  const cards = [];
 
+  const pullOne = (tier) => {
     let name, value, img;
     if (realPool) {
       const realCard = pickRealCard(realPool, tier);
       name = realCard.name;
       img = (realCard.images && (realCard.images.large || realCard.images.small)) || "";
-      if (tier === "secret") value = round2(pack.feature.value * (0.85 + Math.random() * 0.3));
-      else if (tier === "ultra") value = round2(pack.feature.value * 0.5 * (0.85 + Math.random() * 0.3));
-      else if (tier === "holo") value = round2(pack.feature.value * 0.05 * (0.7 + Math.random() * 0.6));
-      else value = round2(0.5 + Math.random() * 2.5);
     } else {
-      // live database unreachable — fall back to a labelled placeholder card
+      name = tier === "common" || tier === "uncommon" ? `${pack.name} Common` : pack.feature.name;
       img = "";
-      if (tier === "secret" || tier === "ultra") {
-        name = pack.feature.name;
-        value = round2(pack.feature.value * (tier === "secret" ? 1.0 : 0.5) * (0.85 + Math.random() * 0.3));
-      } else if (tier === "holo") {
-        name = `${pack.name} Holo Common`;
-        value = round2(pack.feature.value * 0.05 * (0.7 + Math.random() * 0.6));
-      } else {
-        name = `${pack.name} Common`;
-        value = round2(0.5 + Math.random() * 2.5);
-      }
     }
-    results.push(card(name, pack.name, value, rarity, { img }));
+    if (tier === "secret") value = round2(pack.feature.value * (0.85 + Math.random() * 0.3));
+    else if (tier === "ultra") value = round2(pack.feature.value * 0.5 * (0.85 + Math.random() * 0.3));
+    else if (tier === "holo") value = round2(pack.feature.value * 0.05 * (0.7 + Math.random() * 0.6));
+    else value = round2(0.5 + Math.random() * 2.5);
+    return card(name, pack.name, value, tierRarityLabel(tier), { img, isHit: tier === "holo" || tier === "ultra" || tier === "secret" });
+  };
+
+  // Slots 1–9: ordinary cards (or, in a god pack, every slot is a hit).
+  for (let i = 0; i < 9; i++) {
+    const tier = isGodPack ? weightedTierPick({ ultra: 0.6, secret: 0.4 }) : weightedTierPick(NORMAL_SLOT_ODDS);
+    cards.push(pullOne(tier));
   }
-  return results;
+
+  // Slot 10 (second-to-last): the guaranteed "hit" slot.
+  const hitTier = isGodPack ? weightedTierPick({ ultra: 0.5, secret: 0.5 }) : weightedTierPick(HIT_SLOT_ODDS);
+  cards.push(pullOne(hitTier));
+
+  // Slot 11 (last): a basic Energy card — never a hit.
+  cards.push(card("Basic Energy", pack.name, 0.05, "Energy", { img: "", flag: "energy", isHit: false }));
+
+  return { cards, isGodPack };
 }
 function round2(n) { return Math.round(n * 100) / 100; }
 
-function showPackOpenModal(pack, pulled) {
-  document.getElementById("pack-open-title").textContent = `Opened: ${pack.name}`;
-  const wrap = document.getElementById("pack-open-results");
-  wrap.innerHTML = "";
-  pulled.forEach(c => {
-    const div = document.createElement("div");
-    let rClass = "";
-    if (c.rarity === "Secret Rare") rClass = "rarity-secret";
-    else if (c.rarity === "Ultra Rare") rClass = "rarity-ultra";
-    else if (c.rarity === "Holo Rare") rClass = "rarity-holo";
-    div.className = `pulled-card ${rClass}`;
-    const imgTag = c.img
-      ? `<img src="${c.img}" onerror="this.style.display='none'" alt="${c.name}" />`
-      : `<div class="binder-card-img" style="width:100%;"></div>`;
-    div.innerHTML = `
-      ${imgTag}
-      <div>${c.name}</div>
-      <div class="pulled-card-value">${fmtMoney(c.value)}</div>
-    `;
-    wrap.appendChild(div);
-  });
-  log(`Pull complete: ${pulled.length} cards added to binder from ${pack.name}.`, "event");
+/* ---- Tap-to-reveal pack opening sequence ---- */
+let packReveal = null; // { pack, cards, index, isGodPack }
+
+function startPackRevealSequence(pack, cards, isGodPack) {
+  packReveal = { pack, cards, index: 0, isGodPack };
+  document.getElementById("pack-open-title").textContent = isGodPack
+    ? `✨ GOD PACK — ${pack.name} ✨`
+    : `Opening ${pack.name}`;
+  document.getElementById("pack-open-collected").innerHTML = "";
+  document.getElementById("btn-close-pack-open").classList.add("hidden");
   document.getElementById("pack-open-modal").classList.remove("hidden");
+  renderPackRevealStage();
+}
+
+function renderPackRevealStage() {
+  const stage = document.getElementById("pack-reveal-stage");
+  const progress = document.getElementById("pack-open-progress");
+  const { cards, index } = packReveal;
+
+  if (index >= cards.length) {
+    stage.innerHTML = `<div class="pack-reveal-done">All 11 cards revealed! 🎉</div>`;
+    progress.textContent = "Tap Done to add every card to your Binder.";
+    document.getElementById("btn-close-pack-open").classList.remove("hidden");
+    return;
+  }
+
+  const c = cards[index];
+  progress.textContent = `Card ${index + 1} of ${cards.length} — tap to continue`;
+
+  let rClass = "";
+  if (c.rarity === "Secret Rare") rClass = "rarity-secret";
+  else if (c.rarity === "Ultra Rare") rClass = "rarity-ultra";
+  else if (c.rarity === "Holo Rare") rClass = "rarity-holo";
+
+  const imgTag = c.img
+    ? `<img src="${c.img}" alt="${c.name}" onerror="this.style.display='none'" />`
+    : "";
+
+  stage.innerHTML = `
+    <div class="reveal-card ${rClass}" id="reveal-card-current">
+      ${imgTag}
+      <div class="reveal-card-name">${c.name}</div>
+      <div class="reveal-card-rarity">${c.rarity}${c.name === "Basic Energy" ? "" : ""}</div>
+      <div class="reveal-card-value">${fmtMoney(c.value)}</div>
+      ${c.isHit ? '<div class="reveal-hit-badge">HIT!</div>' : ""}
+    </div>
+    <div class="reveal-stack-behind">${"🂠".repeat(Math.max(0, cards.length - index - 1))}</div>
+  `;
+
+  const cardEl = document.getElementById("reveal-card-current");
+  cardEl.addEventListener("click", advancePackReveal, { once: true });
+}
+
+function advancePackReveal() {
+  if (!packReveal) return;
+  const c = packReveal.cards[packReveal.index];
+  inventory.push(c); // every card pulled is added to the binder immediately
+  const currentEl = document.getElementById("reveal-card-current");
+  if (currentEl) currentEl.classList.add("reveal-card-exit");
+
+  const collectedStrip = document.getElementById("pack-open-collected");
+  const thumb = document.createElement("div");
+  thumb.className = "collected-thumb";
+  if (c.img) thumb.innerHTML = `<img src="${c.img}" alt="${c.name}" onerror="this.style.display='none'" />`;
+  collectedStrip.appendChild(thumb);
+
+  renderHeader();
+  renderHome();
+  saveGame();
+
+  packReveal.index++;
+  setTimeout(renderPackRevealStage, 180);
+}
+
+function finishPackReveal() {
+  if (packReveal) {
+    log(`Pull complete: ${packReveal.cards.length} cards added to binder from ${packReveal.pack.name}.`, "event");
+  }
+  packReveal = null;
+  document.getElementById("pack-open-modal").classList.add("hidden");
+  renderBinder();
 }
 
 
@@ -624,9 +880,17 @@ function renderBinder() {
       <div class="binder-card-name">${c.name}</div>
       <div class="binder-card-set">${c.set}</div>
       <div class="binder-card-value">${fmtMoney(c.value)}</div>
+      <div class="binder-card-date">${formatAcquiredDate(c.dateAcquired)}</div>
     `;
     container.appendChild(div);
   });
+}
+
+function formatAcquiredDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-NZ", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function renderMarket() {
@@ -671,16 +935,53 @@ function sellCard(cardId) {
 /* ====================================================
    10. DECK MANAGEMENT
    ==================================================== */
-const DECK_SCHEMA_VERSION = 3; // bump whenever DECK_TEMPLATES changes — invalidates old saves automatically
+const DECK_SCHEMA_VERSION = 4; // bump whenever DECK_TEMPLATES changes — invalidates old saves automatically
 
 async function getActiveDeck() {
   const stale = !activeDeck || activeDeck.length !== 60 || activeDeckVersion !== DECK_SCHEMA_VERSION || !validateDeck(activeDeck).ok;
   if (!stale) return activeDeck;
   activeDeck = await buildStarterDeck();
   activeDeckVersion = DECK_SCHEMA_VERSION;
-  log(`Granted a tournament-ready ${DECK_TEMPLATES.charizard.displayName} deck — 60 cards, 100% legal (max 3 copies per card, unlimited Energy).`, "event");
+  const t = DECK_TEMPLATES[SELECTABLE_DECK_KEYS.includes(activeDeckKey) ? activeDeckKey : "charizard"];
+  log(`Granted a tournament-ready ${t.displayName} deck — 60 cards, 100% legal (max 4 copies per card, unlimited basic Energy).`, "event");
   saveGame();
   return activeDeck;
+}
+
+// Called when the player picks (or switches to) one of the 3 starter decks.
+async function selectStarterDeck(key) {
+  if (!SELECTABLE_DECK_KEYS.includes(key)) return;
+  activeDeckKey = key;
+  activeDeck = null; // force a rebuild on next getActiveDeck() call
+  document.getElementById("deck-select-modal").classList.add("hidden");
+  await getActiveDeck();
+  renderDeckSummary();
+  renderHome();
+  saveGame();
+}
+
+function renderDeckSelectModal() {
+  const grid = document.getElementById("deck-select-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  SELECTABLE_DECK_KEYS.forEach(key => {
+    const t = DECK_TEMPLATES[key];
+    const div = document.createElement("div");
+    div.className = "deck-option-card";
+    div.dataset.deck = key;
+    div.innerHTML = `
+      <div class="deck-option-icon">${t.icon}</div>
+      <div class="deck-option-type">${t.typeLabel} Type</div>
+      <div class="deck-option-name">${t.displayName}</div>
+      <div class="deck-option-subtitle">${t.subtitle}</div>
+      <p class="deck-option-blurb">${t.blurb}</p>
+      <button class="btn-primary deck-option-btn" data-deck="${key}">Select Deck</button>
+    `;
+    grid.appendChild(div);
+  });
+  grid.querySelectorAll(".deck-option-btn").forEach(btn => {
+    btn.addEventListener("click", () => selectStarterDeck(btn.dataset.deck));
+  });
 }
 
 async function renderDeckSummary() {
@@ -737,8 +1038,8 @@ function validateDeck(deck) {
   deck.forEach(c => { counts[c.name] = (counts[c.name] || 0) + 1; });
   for (const c of deck) {
     if (c.flag === "energy") continue; // Energy is unlimited under house rules
-    if (counts[c.name] > 3) {
-      return { ok: false, reason: `Too many duplicates of ${c.name} (max 3).` };
+    if (counts[c.name] > 4) {
+      return { ok: false, reason: `Too many duplicates of ${c.name} (max 4).` };
     }
   }
   return { ok: true };
@@ -759,32 +1060,25 @@ async function startQueue(eventType) {
     renderHeader();
   }
 
-  const deck = await getActiveDeck();
+  log(`Matchmaking queue joined. Searching for opponent…`, "event");
+  const [deck, oppDeck] = await Promise.all([getActiveDeck(), buildOpponentDeck()]);
   const validation = validateDeck(deck);
   if (!validation.ok) { log(`Deck illegal: ${validation.reason}`, "warn"); wallet += fee; renderHeader(); return; }
 
-  log(`Matchmaking queue joined. Searching for opponent…`, "event");
-  const oppDeck = await buildOpponentDeck();
   showMatchFoundThen(() => setupMatch(eventType, deck, oppDeck));
 }
 
 function showMatchFoundThen(callback) {
   const modal = document.getElementById("match-found-modal");
   const timerEl = document.getElementById("match-found-timer");
-  let n = 3;
-  timerEl.textContent = n;
+  timerEl.textContent = "⚡";
   modal.classList.remove("hidden");
-  const interval = setInterval(() => {
-    n--;
-    if (n > 0) {
-      timerEl.textContent = n;
-    } else {
-      clearInterval(interval);
-      modal.classList.add("hidden");
-      log("Opponent found. Entering the arena.", "event");
-      callback();
-    }
-  }, 700);
+  // Near-instant: just enough of a beat for the "Match Found!" flash to register.
+  setTimeout(() => {
+    modal.classList.add("hidden");
+    log("Opponent found. Entering the arena.", "event");
+    callback();
+  }, 250);
 }
 
 function shuffled(arr) {
@@ -810,11 +1104,13 @@ function setupMatch(eventType, deckCards, oppDeckCards) {
     over: false
   };
 
-  // initial setup: draw 7, place a basic active
+  // initial setup: draw 7, place a basic active, bench any other basics drawn
   drawHand(match.player, 7);
   drawHand(match.opponent, 7);
   placeBasicActive(match.player);
   placeBasicActive(match.opponent);
+  autoBenchOpeningBasics(match.player);
+  autoBenchOpeningBasics(match.opponent);
 
   log("Both players drew opening hands of 7. Basic Pokémon placed Active.", "event");
   document.getElementById("league-lobby").style.display = "none";
@@ -853,6 +1149,19 @@ function placeBasicActive(side) {
   basic.hp = basic.hp || 60;
   basic.maxHp = basic.hp;
   side.active = basic;
+}
+
+// Puts any other Basic Pokémon still sitting in the opening hand onto the
+// bench (up to 5), just like a real player would on turn 1.
+function autoBenchOpeningBasics(side) {
+  for (let i = side.hand.length - 1; i >= 0 && side.bench.length < 5; i--) {
+    if (side.hand[i].flag === "basic") {
+      const [basic] = side.hand.splice(i, 1);
+      basic.hp = basic.hp || basic.maxHp || 60;
+      basic.maxHp = basic.hp;
+      side.bench.push(basic);
+    }
+  }
 }
 
 function triggerDeckOut(side) {
@@ -936,15 +1245,15 @@ function renderActiveCard(elId, mon) {
     el.innerHTML = `<span class="zone-label-empty">Active</span>`;
     return;
   }
-  const imgTag = mon.img ? `<img src="${mon.img}" alt="${mon.name}" onerror="this.style.display='none'" />` : "";
-  el.innerHTML = `${imgTag}<div class="hp-pill-lg">${mon.hp}/${mon.maxHp}</div>`;
+  const imgTag = mon.img ? `<img src="${mon.img}" alt="${mon.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : "";
+  el.innerHTML = `${imgTag}<div class="mon-name-fallback" style="display:${mon.img ? 'none' : 'flex'}">${mon.name}</div><div class="hp-pill-lg">${mon.hp}/${mon.maxHp}</div>`;
 }
 
 function renderBenchSlot(elId, mon) {
   const el = document.getElementById(elId);
   if (!mon) { el.innerHTML = ""; return; }
-  const imgTag = mon.img ? `<img src="${mon.img}" alt="${mon.name}" onerror="this.style.display='none'" />` : "";
-  el.innerHTML = `${imgTag}<div class="hp-pill">${mon.hp}</div>`;
+  const imgTag = mon.img ? `<img src="${mon.img}" alt="${mon.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : "";
+  el.innerHTML = `${imgTag}<div class="mon-name-fallback mon-name-fallback-sm" style="display:${mon.img ? 'none' : 'flex'}">${mon.name}</div><div class="hp-pill">${mon.hp}</div>`;
 }
 
 function renderDiscardSlot(elId, countId, discardPile) {
@@ -956,19 +1265,95 @@ function renderDiscardSlot(elId, countId, discardPile) {
 
 function handCardClicked(c) {
   if (match.activePlayer !== "p") { log("It is not your turn.", "warn"); return; }
+
   if (c.flag === "energy") {
     if (match.energyAttachedThisTurn) { log("Energy attachment limit reached this turn (max 1).", "warn"); return; }
     match.energyAttachedThisTurn = true;
-    const idx = match.player.hand.indexOf(c);
-    match.player.hand.splice(idx, 1);
+    removeFromHand(match.player, c);
     log(`Attached ${c.name} to Active Pokémon.`, "event");
     renderMatch();
     return;
   }
+
+  if (c.flag === "basic") { benchPokemon(c); return; }
+  if (c.flag === "stage") { tryEvolve(c); return; }
+
+  // Trainers, items, supporters: preview only for now.
   const img = document.getElementById("card-render-img");
   if (c.img) { img.src = c.img; img.style.display = ""; }
   else { img.removeAttribute("src"); img.style.display = "none"; }
   document.getElementById("card-meta").textContent = `${c.name} — ${c.set}`;
+}
+
+function removeFromHand(side, c) {
+  const idx = side.hand.indexOf(c);
+  if (idx !== -1) side.hand.splice(idx, 1);
+}
+
+// Places a Basic Pokémon from hand onto the bench (or Active if empty).
+function benchPokemon(c) {
+  const side = match.player;
+  if (!side.active) {
+    removeFromHand(side, c);
+    side.active = c;
+    log(`${c.name} placed as your Active Pokémon.`, "event");
+    renderMatch();
+    return;
+  }
+  if (side.bench.length >= 5) { log("Bench is full (max 5).", "warn"); return; }
+  removeFromHand(side, c);
+  side.bench.push(c);
+  log(`${c.name} placed on your Bench.`, "event");
+  renderMatch();
+}
+
+// Evolves a Basic (or Stage 1) already in play into the Stage card clicked
+// in hand — either directly (matching evolvesFrom) or via Rare Candy
+// (skipping straight from the Basic listed in rareCandyFrom).
+function tryEvolve(c) {
+  const side = match.player;
+  const inPlay = [side.active, ...side.bench].filter(Boolean);
+
+  const directTarget = inPlay.find(mon => mon.name === c.evolvesFrom);
+  if (directTarget) {
+    performEvolution(directTarget, c);
+    return;
+  }
+
+  if (c.rareCandyFrom) {
+    const skipTarget = inPlay.find(mon => mon.name === c.rareCandyFrom);
+    const rareCandy = side.hand.find(h => h.name === "Rare Candy");
+    if (skipTarget && rareCandy) {
+      removeFromHand(side, rareCandy);
+      side.discard.push(rareCandy);
+      performEvolution(skipTarget, c, true);
+      return;
+    }
+    if (skipTarget && !rareCandy) {
+      log(`Need a Rare Candy in hand to evolve ${skipTarget.name} straight into ${c.name}.`, "warn");
+      return;
+    }
+  }
+
+  const need = c.rareCandyFrom
+    ? `${c.evolvesFrom} in play, or Rare Candy + ${c.rareCandyFrom} in play`
+    : `${c.evolvesFrom} in play`;
+  log(`Can't evolve into ${c.name} yet — you need ${need}.`, "warn");
+}
+
+function performEvolution(mon, evoCard, viaRareCandy) {
+  removeFromHand(match.player, evoCard);
+  const damageTaken = mon.maxHp - mon.hp;
+  mon.name = evoCard.name;
+  mon.img = evoCard.img;
+  mon.evolvesFrom = evoCard.evolvesFrom;
+  mon.rareCandyFrom = evoCard.rareCandyFrom;
+  mon.maxHp = evoCard.maxHp || evoCard.hp || mon.maxHp;
+  mon.hp = Math.max(1, mon.maxHp - damageTaken);
+  log(viaRareCandy
+    ? `Rare Candy used — evolved straight into ${mon.name}!`
+    : `Evolved into ${mon.name}!`, "event");
+  renderMatch();
 }
 
 function flipCoin() {
@@ -1165,16 +1550,15 @@ function wireEvents() {
     document.getElementById("settings-modal").classList.add("hidden");
   });
 
-  document.getElementById("btn-close-pack-open").addEventListener("click", () => {
-    document.getElementById("pack-open-modal").classList.add("hidden");
-    renderBinder();
-  });
+  document.getElementById("btn-close-pack-open").addEventListener("click", finishPackReveal);
 
   document.getElementById("btn-change-deck").addEventListener("click", () => {
-    document.getElementById("deck-modal").classList.remove("hidden");
+    renderDeckSelectModal();
+    document.getElementById("deck-select-modal").classList.remove("hidden");
   });
-  document.getElementById("btn-close-deck-modal").addEventListener("click", () => {
-    document.getElementById("deck-modal").classList.add("hidden");
+  document.getElementById("btn-close-deck-select").addEventListener("click", () => {
+    // Closing without picking keeps (or defaults to) the Charizard ex deck.
+    document.getElementById("deck-select-modal").classList.add("hidden");
   });
 
   document.getElementById("binder-sort").addEventListener("change", renderBinder);
@@ -1191,7 +1575,14 @@ function boot() {
   renderHome();
   renderDeckSummary();
   renderTournamentList();
+  populateStarterBinder();
   log(`PokeTCGNZ engine online. ${ALL_PACKS.length} booster sets loaded.`, "event");
+
+  // No deck chosen yet this session — offer the 3 starter archetypes up front.
+  if (!activeDeckKey) {
+    renderDeckSelectModal();
+    document.getElementById("deck-select-modal").classList.remove("hidden");
+  }
 }
 
 document.addEventListener("DOMContentLoaded", boot);
