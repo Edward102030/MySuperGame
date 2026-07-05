@@ -2,8 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Prize Rush · Pokémon TCG Tournament &amp; Collection</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PokeTCGNZ">
+<meta name="theme-color" content="#14171C">
+<title>PokeTCGNZ · Pokémon TCG</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -11,47 +15,50 @@
 </head>
 <body>
 
-<!-- ============ BOOT / LOADING ============ -->
+<!-- ============ BOOT ============ -->
 <div id="screen-boot" class="screen boot-screen active">
   <div class="boot-mark">
     <div class="boot-orb"></div>
-    <h1 class="boot-title">PRIZE RUSH</h1>
-    <p class="boot-sub" id="boot-status">Loading configuration…</p>
+    <h1 class="boot-title">POKETCGNZ</h1>
+    <p class="boot-sub" id="boot-status">Initialising…</p>
     <div class="boot-bar"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
   </div>
 </div>
 
-<!-- ============ WELCOME (first launch) ============ -->
+<!-- ============ WELCOME ============ -->
 <div id="screen-welcome" class="screen welcome-screen">
+  <div class="welcome-bg"></div>
   <div class="welcome-panel">
-    <div class="welcome-eyebrow">Welcome, Trainer</div>
-    <h1 class="welcome-title">Prize<span>Rush</span></h1>
-    <p class="welcome-copy">Collect cards, build decks, battle the AI, and climb the bracket. Card data &amp; artwork courtesy of the Pokémon TCG API.</p>
+    <div class="welcome-eyebrow">Pokémon TCG · Tournament &amp; Collection</div>
+    <h1 class="welcome-title">Poke<span>TCGNZ</span></h1>
+    <p class="welcome-copy">Collect cards, build decks, battle AI opponents, and climb the tournament bracket. Card data &amp; artwork from the Pokémon TCG API.</p>
     <div class="welcome-actions">
       <button class="btn btn-primary btn-lg" data-action="show-create-account">Create Account</button>
       <button class="btn btn-secondary btn-lg" data-action="show-login">Login</button>
       <button class="btn btn-ghost btn-lg" data-action="continue-guest">Continue as Guest</button>
     </div>
+    <p class="welcome-legal">Card artwork © The Pokémon Company. This is a fan project.</p>
   </div>
 </div>
 
-<!-- ============ AUTH FORMS ============ -->
+<!-- ============ AUTH ============ -->
 <div id="screen-auth" class="screen auth-screen">
   <div class="auth-panel">
     <button class="btn-icon auth-back" data-action="back-to-welcome" aria-label="Back">←</button>
+    <div class="auth-brand">PT</div>
     <h2 id="auth-title" class="auth-title">Login</h2>
-    <form id="auth-form" class="auth-form">
+    <form id="auth-form" class="auth-form" novalidate>
       <label class="field">
         <span>Username</span>
-        <input type="text" id="auth-username" autocomplete="username" required minlength="3">
+        <input type="text" id="auth-username" autocomplete="username" required minlength="3" placeholder="at least 3 characters">
       </label>
       <label class="field" id="auth-nickname-field" hidden>
-        <span>Display nickname</span>
-        <input type="text" id="auth-nickname" autocomplete="nickname">
+        <span>Display name</span>
+        <input type="text" id="auth-nickname" autocomplete="nickname" placeholder="how you appear in-game">
       </label>
       <label class="field">
         <span>Password</span>
-        <input type="password" id="auth-password" autocomplete="current-password" required minlength="4">
+        <input type="password" id="auth-password" autocomplete="current-password" required minlength="4" placeholder="at least 4 characters">
       </label>
       <label class="field-check">
         <input type="checkbox" id="auth-remember" checked>
@@ -64,25 +71,25 @@
   </div>
 </div>
 
-<!-- ============ STARTER DECK SELECT ============ -->
+<!-- ============ STARTER DECK ============ -->
 <div id="screen-starter" class="screen starter-screen">
   <div class="starter-head">
     <div class="starter-eyebrow">One choice, Trainer</div>
-    <h2>Pick your starter deck</h2>
-    <p>Every deck centers on an ex evolution. You can build more decks later.</p>
+    <h2>Pick Your Starter Deck</h2>
+    <p>Each deck is built around a powerful ex Pokémon. You can build custom decks later.</p>
   </div>
   <div class="starter-grid" id="starter-grid"></div>
 </div>
 
 <!-- ============ APP SHELL ============ -->
 <div id="app-shell" class="app-shell">
-  <nav class="side-nav" id="side-nav">
-    <div class="side-nav-brand">PR</div>
+  <nav class="side-nav" id="side-nav" aria-label="Main navigation">
+    <div class="side-nav-brand">PT</div>
     <button class="nav-item" data-nav="home" aria-label="Home"><span class="nav-ic">⌂</span><span>Home</span></button>
     <button class="nav-item" data-nav="play" aria-label="Play"><span class="nav-ic">▶</span><span>Play</span></button>
     <button class="nav-item" data-nav="decks" aria-label="Decks"><span class="nav-ic">▣</span><span>Decks</span></button>
     <button class="nav-item" data-nav="binder" aria-label="Binder"><span class="nav-ic">▤</span><span>Binder</span></button>
-    <button class="nav-item" data-nav="shop" aria-label="Shop"><span class="nav-ic">$</span><span>Shop</span></button>
+    <button class="nav-item" data-nav="shop" aria-label="Shop"><span class="nav-ic">✦</span><span>Shop</span></button>
     <button class="nav-item" data-nav="tournament" aria-label="Tournament"><span class="nav-ic">♛</span><span>Tourney</span></button>
     <button class="nav-item" data-nav="profile" aria-label="Profile"><span class="nav-ic">◉</span><span>Profile</span></button>
     <button class="nav-item" data-nav="settings" aria-label="Settings"><span class="nav-ic">⚙</span><span>Settings</span></button>
@@ -90,39 +97,60 @@
 
   <div class="app-main">
     <header class="top-bar">
+      <button class="btn-icon mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">☰</button>
       <div class="top-bar-title" id="top-bar-title">Home</div>
-      <div class="top-bar-wallet" id="top-bar-wallet">NZ$0.00</div>
+      <div class="top-bar-wallet" id="top-bar-wallet" title="Your balance">NZ$0.00</div>
     </header>
 
-    <main class="screen-area" id="screen-area">
-
-      <section class="page" data-page="home" id="page-home"></section>
-      <section class="page" data-page="play" id="page-play"></section>
-      <section class="page" data-page="match" id="page-match"></section>
-      <section class="page" data-page="decks" id="page-decks"></section>
-      <section class="page" data-page="deckedit" id="page-deckedit"></section>
-      <section class="page" data-page="binder" id="page-binder"></section>
-      <section class="page" data-page="shop" id="page-shop"></section>
-      <section class="page" data-page="opening" id="page-opening"></section>
+    <main class="screen-area" id="screen-area" role="main">
+      <section class="page" data-page="home"       id="page-home"></section>
+      <section class="page" data-page="play"       id="page-play"></section>
+      <section class="page" data-page="match"      id="page-match"></section>
+      <section class="page" data-page="decks"      id="page-decks"></section>
+      <section class="page" data-page="deckedit"   id="page-deckedit"></section>
+      <section class="page" data-page="binder"     id="page-binder"></section>
+      <section class="page" data-page="shop"       id="page-shop"></section>
+      <section class="page" data-page="opening"    id="page-opening"></section>
       <section class="page" data-page="tournament" id="page-tournament"></section>
-      <section class="page" data-page="profile" id="page-profile"></section>
-      <section class="page" data-page="settings" id="page-settings"></section>
-
+      <section class="page" data-page="profile"    id="page-profile"></section>
+      <section class="page" data-page="settings"   id="page-settings"></section>
     </main>
 
-    <nav class="bottom-nav" id="bottom-nav">
-      <button class="nav-item" data-nav="home"><span class="nav-ic">⌂</span></button>
-      <button class="nav-item" data-nav="play"><span class="nav-ic">▶</span></button>
-      <button class="nav-item" data-nav="binder"><span class="nav-ic">▤</span></button>
-      <button class="nav-item" data-nav="shop"><span class="nav-ic">$</span></button>
-      <button class="nav-item" data-nav="profile"><span class="nav-ic">◉</span></button>
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Mobile navigation">
+      <button class="nav-item" data-nav="home"       aria-label="Home"><span class="nav-ic">⌂</span><span>Home</span></button>
+      <button class="nav-item" data-nav="play"       aria-label="Play"><span class="nav-ic">▶</span><span>Play</span></button>
+      <button class="nav-item" data-nav="binder"     aria-label="Binder"><span class="nav-ic">▤</span><span>Binder</span></button>
+      <button class="nav-item" data-nav="shop"       aria-label="Shop"><span class="nav-ic">✦</span><span>Shop</span></button>
+      <button class="nav-item" data-nav="tournament" aria-label="Tournament"><span class="nav-ic">♛</span><span>Tourney</span></button>
     </nav>
   </div>
 </div>
 
-<!-- ============ GLOBAL OVERLAYS ============ -->
-<div id="dialog-root" class="dialog-root" aria-live="polite"></div>
-<div id="toast-root" class="toast-root" aria-live="polite"></div>
+<!-- mobile slide-out nav overlay -->
+<div id="mobile-nav-overlay" class="mobile-nav-overlay">
+  <div class="mobile-nav-panel">
+    <div class="mobile-nav-header">
+      <span class="mobile-nav-brand">PokeTCGNZ</span>
+      <button class="btn-icon" id="mobile-nav-close">✕</button>
+    </div>
+    <div id="mobile-nav-user" class="mobile-nav-user"></div>
+    <nav class="mobile-nav-links">
+      <button class="mobile-nav-item" data-nav="home">⌂ Home</button>
+      <button class="mobile-nav-item" data-nav="play">▶ Play</button>
+      <button class="mobile-nav-item" data-nav="decks">▣ Decks</button>
+      <button class="mobile-nav-item" data-nav="binder">▤ Binder</button>
+      <button class="mobile-nav-item" data-nav="shop">✦ Shop</button>
+      <button class="mobile-nav-item" data-nav="tournament">♛ Tournament</button>
+      <button class="mobile-nav-item" data-nav="profile">◉ Profile</button>
+      <button class="mobile-nav-item" data-nav="settings">⚙ Settings</button>
+    </nav>
+  </div>
+</div>
+
+<!-- ============ OVERLAYS ============ -->
+<div id="dialog-root"   class="dialog-root"  role="dialog" aria-modal="true" aria-live="polite"></div>
+<div id="toast-root"    class="toast-root"   aria-live="polite" aria-atomic="false"></div>
+<div id="loading-cover" class="loading-cover"></div>
 
 <script src="storage.js"></script>
 <script src="api.js"></script>
