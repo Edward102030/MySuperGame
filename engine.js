@@ -1,463 +1,429 @@
 /* ============================================================
    engine.js — GameState, Rules Engine, Match Controller
-   The game state object is always the single source of truth;
-   the interface never drives state, it only reflects it.
-   Deck size is trimmed to 20/3-prize for fast, learnable matches
-   (per spec: starter decks are explicitly "introductory," and
-   this keeps a full match playable in a few minutes end to end).
    ============================================================ */
 (function(global){
   const BENCH_MAX = 3;
   const HAND_START = 4;
   const PRIZES = 3;
 
-  /* ---------- Rules Engine (pure functions, no side effects on UI) ---------- */
+  /* ---------- Helpers ---------- */
+  function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+  function cardStage(card){
+    if(!card) return null;
+    const sub=(card.subtypes||[]).find(s=>/^(basic|stage 1|stage 2)$/i.test(s));
+    return sub || card.stage || (card.supertype==='Pokémon'?'Basic':null);
+  }
+  function isEnergyLike(card){ return card && (card.supertype==='Energy' || /energy/i.test(card.name||'')); }
+  function energyType(card){ return (card.types&&card.types[0]) || (card.name||'').replace(/\s*Energy/i,'') || 'Colorless'; }
+  function findSlot(p, u){ if(p.active&&p.active.uid===u) return p.active; return p.bench.find(s=>s.uid===u)||null; }
+
+  /* ---------- Rules Engine ---------- */
   const Rules = {
-    canPlayBasic(state, side){
-      const p = state.players[side];
-      return p.active || p.bench.length < BENCH_MAX;
-    },
+    canPlayBasic(state, side){ const p=state.players[side]; return !p.active || p.bench.length<BENCH_MAX; },
     canAttachEnergy(state, side){ return !state.players[side].energyAttachedThisTurn; },
     canEvolve(slot, card, state){
-      if(!slot || slot.turnPlayed === state.turn) return false; // can't evolve the turn it entered play
-      const meta = Binder._getMeta(slot.cardId);
-      return meta && card.evolvesFrom === meta.name;
+      if(!slot||slot.turnPlayed===state.turn) return false;
+      const meta=Binder._getMeta(slot.cardId);
+      return !!(meta && card.evolvesFrom && card.evolvesFrom.toLowerCase()===meta.name.toLowerCase());
     },
     canRetreat(slot){
       if(!slot) return false;
-      const cost = (Binder._getMeta(slot.cardId).retreatCost || []).length;
-      return slot.energy.length >= cost && !slot.statusConditions.includes('Asleep') && !slot.statusConditions.includes('Paralyzed');
+      const meta=Binder._getMeta(slot.cardId);
+      const cost=(meta&&meta.retreatCost||[]).length;
+      return slot.energy.length>=cost && !slot.statusConditions.includes('Asleep') && !slot.statusConditions.includes('Paralyzed');
     },
     attackCostMet(slot, attack){
-      const cost = attack.cost || [];
-      const pool = [...slot.energy];
-      const nonColorless = cost.filter(c => c !== 'Colorless');
-      for(const type of nonColorless){
-        const idx = pool.indexOf(type);
-        if(idx === -1) return false;
-        pool.splice(idx, 1);
-      }
-      const colorlessNeeded = cost.length - nonColorless.length;
-      return pool.length >= colorlessNeeded;
+      const cost=attack.cost||[]; const pool=[...slot.energy];
+      for(const t of cost.filter(c=>c!=='Colorless')){ const i=pool.findIndex(e=>e.toLowerCase()===t.toLowerCase()); if(i===-1) return false; pool.splice(i,1); }
+      return pool.length>=(cost.filter(c=>c==='Colorless').length);
     },
     computeDamage(attack, attackerCard, defenderCard){
-      let dmg = parseInt(String(attack.damage || '0').replace(/\D/g,'')) || 0;
-      const weak = (defenderCard.weaknesses || []).find(w => attackerCard.types && attackerCard.types.includes(w.type));
-      const resist = (defenderCard.resistances || []).find(r => attackerCard.types && attackerCard.types.includes(r.type));
-      if(weak) dmg *= 2;
-      if(resist) dmg = Math.max(0, dmg - 30);
+      let dmg=parseInt(String(attack.damage||'0').replace(/\D/g,''))||0;
+      const weak=(defenderCard.weaknesses||[]).find(w=>attackerCard.types&&attackerCard.types.some(t=>t.toLowerCase()===w.type.toLowerCase()));
+      const resist=(defenderCard.resistances||[]).find(r=>attackerCard.types&&attackerCard.types.some(t=>t.toLowerCase()===r.type.toLowerCase()));
+      if(weak) dmg=Math.floor(dmg*(parseFloat(weak.value)||2));
+      if(resist) dmg=Math.max(0,dmg-(parseInt(String(resist.value||'-30').replace(/\D/g,''))||30));
       return dmg;
     },
-    isKO(slot, card){ return slot.damage >= parseInt(card.hp || '0'); },
-    prizesForKO(card){ return /\bex\b/i.test(card.name) ? 2 : 1; },
+    isKO(slot, card){ return slot.damage>=(parseInt(card.hp||'0')); },
+    prizesForKO(card){ return /\bex\b|\bv\b|\bvmax\b|\bvstar\b/i.test(card.name||card.subtypes||'')?2:1; },
     checkWinner(state){
       for(const side of ['self','opp']){
-        const p = state.players[side];
-        const other = side === 'self' ? 'opp' : 'self';
-        if(p.prizesRemaining <= 0) return other;
-        if(!p.active && p.bench.length === 0) return other;
-        if(p.deck.length === 0 && p.mustDrawNext) return other;
+        const p=state.players[side]; const other=side==='self'?'opp':'self';
+        if(p.prizesRemaining<=0) return other;
+        if(!p.active&&p.bench.length===0&&state.turn>1) return other;
+        if(p.deck.length===0&&p.mustDrawNext) return other;
       }
       return null;
     }
   };
 
-  /* ---------- Match Controller ---------- */
-  let match = null; // current GameState
+  /* ---------- Match state ---------- */
+  let match=null;
 
   const Engine = {
     Rules,
-
-    async startMatch(deckId, opts = {}){
-      const deck = DeckBuilder.getDeck(deckId);
-      if(!deck) return UI.toast('Deck not found', 'error');
-      const v = DeckBuilder.validate(deck);
-      if(!v.valid){ UI.toast('This deck is not tournament-ready yet.', 'warning'); return; }
-
-      match = buildInitialState(deck, opts);
-      Persistence.saveMatchSnapshot(Auth.currentUser.id, match);
-      UI.navigate('match', { title: 'Match' });
-      Events.emit('MatchStarted', { deckId });
-      logMsg(`Turn 1 — ${match.players.self.name} goes first.`);
-      renderMatch(document.getElementById('page-match'));
-      if(match.players[match.activeSide].isAI) await AI.takeTurn(Engine);
-    },
-
-    resume(snapshot){
-      match = snapshot;
-      UI.navigate('match', { title: 'Match (resumed)' });
-      renderMatch(document.getElementById('page-match'));
-      if(match.players[match.activeSide].isAI && !match.winner) AI.takeTurn(Engine);
-    },
-
     getMatch(){ return match; },
 
-    /* ---- Player actions (all pass through here — never mutate state elsewhere) ---- */
+    async startMatch(deckId, opts={}){
+      const deck=DeckBuilder.getDeck(deckId);
+      if(!deck){ UI.toast('Deck not found','error'); return; }
+      const v=DeckBuilder.validate(deck);
+      if(!v.valid){ UI.toast('Deck is not ready: '+v.errors[0],'warning'); return; }
+      const aiDeck=opts.opponentDeck||pickAiDeck(deck);
+      match=buildState(deck, aiDeck, opts);
+      Events.emit('MatchStarted',{deckId});
+      UI.navigate('match',{title:'Match'});
+      log(`Turn 1 — ${match.players.self.name} goes first.`);
+      render();
+      Persistence.saveMatchSnapshot(Auth.currentUser.id, match);
+    },
+
+    resume(snapshot){ match=snapshot; UI.navigate('match',{title:'Match (resumed)'}); render(); if(match.players[match.activeSide].isAI&&!match.winner) setTimeout(()=>AI.takeTurn(Engine),600); },
+
     async playBasic(cardId, toActive){
-      await runAction(() => {
-        const side = match.activeSide;
-        const p = match.players[side];
-        const idx = p.hand.indexOf(cardId);
-        if(idx === -1) return;
-        const card = Binder._getMeta(cardId);
-        if(cardStage(card) !== 'Basic') return;
-        const slot = { uid: uid(), cardId, damage:0, energy:[], statusConditions:[], turnPlayed: match.turn };
-        if(toActive && !p.active) p.active = slot;
-        else if(p.bench.length < BENCH_MAX) p.bench.push(slot);
-        else return;
-        p.hand.splice(idx, 1);
-        logMsg(`${p.name} played ${card.name}.`);
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        const idx=p.hand.indexOf(cardId); if(idx===-1) return;
+        const card=Binder._getMeta(cardId);
+        if(cardStage(card)!=='Basic') return;
+        const slot={uid:uid(),cardId,damage:0,energy:[],statusConditions:[],turnPlayed:match.turn};
+        if(toActive&&!p.active) p.active=slot;
+        else if(p.bench.length<BENCH_MAX) p.bench.push(slot);
+        else{ UI.toast('Bench is full','warning',1800); return; }
+        p.hand.splice(idx,1);
+        log(`${p.name} played ${card.name}.`);
       });
     },
 
     async evolve(handCardId, targetSlotUid){
-      await runAction(() => {
-        const p = match.players[match.activeSide];
-        const card = Binder._getMeta(handCardId);
-        const slot = findSlot(p, targetSlotUid);
-        if(!Rules.canEvolve(slot, card, match)) return;
-        const idx = p.hand.indexOf(handCardId);
-        p.hand.splice(idx, 1);
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        const card=Binder._getMeta(handCardId);
+        const slot=findSlot(p,targetSlotUid);
+        if(!slot||!Rules.canEvolve(slot,card,match)){ UI.toast('Cannot evolve that Pokémon right now.','warning',2000); return; }
+        const idx=p.hand.indexOf(handCardId); if(idx===-1) return;
         p.discard.push(slot.cardId);
-        slot.cardId = handCardId;
-        slot.turnPlayed = match.turn;
-        logMsg(`${p.name} evolved into ${card.name}.`);
+        p.hand.splice(idx,1);
+        slot.cardId=handCardId; slot.turnPlayed=match.turn;
+        log(`${p.name} evolved to ${card.name}!`);
       });
     },
 
     async attachEnergy(cardId, targetSlotUid){
-      await runAction(() => {
-        const p = match.players[match.activeSide];
-        if(!Rules.canAttachEnergy(match, match.activeSide)) return;
-        const card = Binder._getMeta(cardId);
-        const slot = findSlot(p, targetSlotUid);
-        if(!slot || card.supertype !== 'Energy' && !isEnergyLike(card)) return;
-        const idx = p.hand.indexOf(cardId);
-        if(idx === -1) return;
-        p.hand.splice(idx, 1);
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        if(!Rules.canAttachEnergy(match,match.activeSide)){ UI.toast('Already attached energy this turn.','warning',2000); return; }
+        const idx=p.hand.indexOf(cardId); if(idx===-1) return;
+        const card=Binder._getMeta(cardId);
+        if(!isEnergyLike(card)) return;
+        const slot=findSlot(p,targetSlotUid)||p.active;
+        if(!slot) return;
+        p.hand.splice(idx,1);
         slot.energy.push(energyType(card));
-        p.energyAttachedThisTurn = true;
-        logMsg(`${p.name} attached ${energyType(card)} Energy.`);
+        p.energyAttachedThisTurn=true;
+        log(`${p.name} attached ${energyType(card)} Energy.`);
       });
     },
 
-    async retreat(targetBenchUid){
-      await runAction(() => {
-        const p = match.players[match.activeSide];
-        if(!p.active || !Rules.canRetreat(p.active)) return;
-        const bench = findSlot(p, targetBenchUid);
+    async retreat(toBenchUid){
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        if(!p.active){ UI.toast('No active Pokémon to retreat.','warning',1800); return; }
+        if(!Rules.canRetreat(p.active)){ UI.toast('Cannot retreat — not enough energy or a status condition prevents it.','warning',2200); return; }
+        const bench=findSlot(p,toBenchUid);
         if(!bench) return;
-        const cost = (Binder._getMeta(p.active.cardId).retreatCost || []).length;
-        p.active.energy.splice(0, cost);
-        p.bench = p.bench.filter(s => s.uid !== targetBenchUid);
+        const meta=Binder._getMeta(p.active.cardId);
+        const cost=(meta&&meta.retreatCost||[]).length;
+        p.active.energy.splice(0,cost);
+        p.bench=p.bench.filter(s=>s.uid!==toBenchUid);
         p.bench.push(p.active);
-        p.active = bench;
-        logMsg(`${p.name} retreated.`);
+        p.active=bench;
+        log(`${p.name} retreated.`);
+      });
+    },
+
+    async playTrainer(cardId){
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        const idx=p.hand.indexOf(cardId); if(idx===-1) return;
+        const card=Binder._getMeta(cardId);
+        p.hand.splice(idx,1); p.discard.push(cardId);
+        drawCards(p,1);
+        log(`${p.name} played ${card.name} — drew a card.`);
       });
     },
 
     async attack(attackIndex){
-      await runAction(async () => {
-        const side = match.activeSide, otherSide = side === 'self' ? 'opp' : 'self';
-        const p = match.players[side], o = match.players[otherSide];
-        if(!p.active || !o.active) return;
-        const card = Binder._getMeta(p.active.cardId);
-        const attack = (card.attacks || [])[attackIndex];
-        if(!attack || !Rules.attackCostMet(p.active, attack)) return;
-        const defenderCard = Binder._getMeta(o.active.cardId);
-        const dmg = Rules.computeDamage(attack, card, defenderCard);
-        o.active.damage += dmg;
-        logMsg(`${p.name}'s ${card.name} used ${attack.name} for ${dmg}.`);
-        await Animations.shake(document.querySelector('.active-slot.opp'));
-        if(Rules.isKO(o.active, defenderCard)){
-          logMsg(`${defenderCard.name} was knocked out!`);
-          await Animations.knockOut(document.querySelector('.active-slot.opp'));
-          o.discard.push(o.active.cardId, ...o.active.energy.map(()=>null).filter(Boolean));
-          o.active = o.bench.shift() || null;
-          const prizesToTake = Rules.prizesForKO(defenderCard);
-          for(let i=0;i<prizesToTake && p.prizesRemaining>0;i++) p.prizesRemaining--;
+      await action(async()=>{
+        const side=match.activeSide, other=side==='self'?'opp':'self';
+        const p=match.players[side], o=match.players[other];
+        if(!p.active||!o.active) return;
+        const card=Binder._getMeta(p.active.cardId);
+        const atk=(card.attacks||[])[attackIndex];
+        if(!atk||!Rules.attackCostMet(p.active,atk)){ UI.toast('Not enough energy for that attack.','warning',2000); return; }
+        const defCard=Binder._getMeta(o.active.cardId);
+        const dmg=Rules.computeDamage(atk,card,defCard);
+        o.active.damage+=dmg;
+        log(`${card.name} used ${atk.name}${dmg?' for '+dmg+' damage':''}.`);
+        await Animations.shake(document.getElementById('opp-active'));
+        render();
+        if(Rules.isKO(o.active,defCard)){
+          log(`${defCard.name} was knocked out!`);
+          await Animations.knockOut(document.getElementById('opp-active'));
+          o.discard.push(o.active.cardId);
+          o.active=o.bench.shift()||null;
+          const prizes=Rules.prizesForKO(defCard);
+          for(let i=0;i<prizes&&p.prizesRemaining>0;i++){
+            p.prizesRemaining--;
+            const dot=document.querySelector('.prize-pip:not(.taken)');
+            if(dot) await Animations.pulse(dot,'fx-prize',400);
+          }
+          log(`${p.name} took ${prizes} prize card${prizes>1?'s':''}! (${p.prizesRemaining} remaining)`);
+          if(o.active) log(`${o.active ? Binder._getMeta(o.active.cardId)?.name||'?' : '?'} is now the active Pokémon.`);
         }
-        match.turnFlags.attacked = true;
+        match.turnFlags.attacked=true;
       });
-      await checkAndEndIfNeeded();
-    },
-
-    async playTrainer(cardId){
-      await runAction(() => {
-        const p = match.players[match.activeSide];
-        const idx = p.hand.indexOf(cardId);
-        if(idx === -1) return;
-        const card = Binder._getMeta(cardId);
-        p.hand.splice(idx, 1);
-        p.discard.push(cardId);
-        // Generic, faithful-in-spirit resolution for arbitrary trainer text within this simplified engine:
-        drawCards(p, 1);
-        logMsg(`${p.name} played ${card.name}.`);
-      });
+      await checkEnd();
     },
 
     async endTurn(){
-      await runAction(() => { match.turnFlags = { attacked:false }; });
-      const finished = await checkAndEndIfNeeded();
-      if(finished) return;
+      if(match.winner) return;
+      await action(()=>{ match.turnFlags={attacked:false}; });
+      if(await checkEnd()) return;
       switchTurn();
     },
 
     async concede(){
-      match.winner = match.activeSide === 'self' ? 'opp' : 'self';
+      match.winner=match.activeSide==='self'?'opp':'self';
+      log(`${match.players[match.activeSide==='self'?'self':'opp'].name} conceded.`);
       await finishMatch();
     }
   };
 
-  /* ---------- Internal helpers ---------- */
-  /** Derives a Basic/Stage 1/Stage 2 label from the real API's `subtypes` array,
-      falling back to the `stage` field used by this build's offline mock cards. */
-  function cardStage(card){
-    if(!card) return null;
-    const fromSubtypes = (card.subtypes || []).find(s => /^(basic|stage 1|stage 2)$/i.test(s));
-    return fromSubtypes || card.stage || (card.supertype === 'Pokémon' ? 'Basic' : null);
-  }
-  function uid(){ return 'slot_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-  function findSlot(p, u){ if(p.active && p.active.uid === u) return p.active; return p.bench.find(s => s.uid === u); }
-  function isEnergyLike(card){ return card.supertype === 'Energy' || /energy/i.test(card.name || ''); }
-  function energyType(card){ return (card.types && card.types[0]) || (card.name||'').replace(/\s*Energy/i,'') || 'Colorless'; }
-  function logMsg(msg){ match.log.push(msg); Events.emit('MatchLogged', msg); }
-  function drawCards(p, n){
-    for(let i=0;i<n;i++){
-      if(p.deck.length === 0){ p.mustDrawNext = true; continue; }
-      p.hand.push(p.deck.shift());
-    }
+  function log(msg){ match.log.push(msg); Events.emit('MatchLogged',msg); }
+  function drawCards(p,n){ for(let i=0;i<n;i++){ if(!p.deck.length){ p.mustDrawNext=true; return; } p.hand.push(p.deck.shift()); } }
+
+  async function action(fn){
+    const r=fn(); if(r instanceof Promise) await r;
+    render();
+    Persistence.saveMatchSnapshot(Auth.currentUser.id,match);
   }
 
-  async function runAction(fn){
-    const result = fn();
-    if(result instanceof Promise) await result;
-    renderMatch(document.getElementById('page-match'));
-    Persistence.saveMatchSnapshot(Auth.currentUser.id, match);
-  }
-
-  async function checkAndEndIfNeeded(){
-    const winner = Rules.checkWinner(match);
-    if(winner){ match.winner = winner; await finishMatch(); return true; }
+  async function checkEnd(){
+    const w=Rules.checkWinner(match);
+    if(w){ match.winner=w; render(); await finishMatch(); return true; }
     return false;
   }
 
   function switchTurn(){
-    match.activeSide = match.activeSide === 'self' ? 'opp' : 'self';
-    match.turn += 1;
-    const p = match.players[match.activeSide];
-    p.energyAttachedThisTurn = false;
-    drawCards(p, 1);
-    logMsg(`Turn ${match.turn} — ${p.name}'s turn.`);
-    renderMatch(document.getElementById('page-match'));
-    Persistence.saveMatchSnapshot(Auth.currentUser.id, match);
-    if(p.isAI && !match.winner) setTimeout(() => AI.takeTurn(Engine), 500);
+    match.activeSide=match.activeSide==='self'?'opp':'self';
+    match.turn++;
+    const p=match.players[match.activeSide];
+    p.energyAttachedThisTurn=false; p.mustDrawNext=false;
+    drawCards(p,1);
+    log(`Turn ${match.turn} — ${p.name}'s turn.`);
+    render();
+    Persistence.saveMatchSnapshot(Auth.currentUser.id,match);
+    if(p.isAI&&!match.winner) setTimeout(()=>AI.takeTurn(Engine),600);
   }
 
   async function finishMatch(){
     Persistence.clearMatchSnapshot(Auth.currentUser.id);
-    const d = Persistence.getUserData(Auth.currentUser.id);
-    const won = match.winner === 'self';
-    d.statistics.matchesPlayed++;
-    if(won) d.statistics.matchesWon++; else d.statistics.matchesLost++;
-    const deck = d.decks[match.deckId];
+    const won=match.winner==='self';
+    const d=Persistence.getUserData(Auth.currentUser.id);
+    d.statistics.matchesPlayed=(d.statistics.matchesPlayed||0)+1;
+    if(won) d.statistics.matchesWon=(d.statistics.matchesWon||0)+1;
+    else d.statistics.matchesLost=(d.statistics.matchesLost||0)+1;
+    const deck=d.decks[match.deckId];
     if(deck){ deck.stats.played++; if(won) deck.stats.won++; else deck.stats.lost++; }
-    Persistence.saveUserData(Auth.currentUser.id, d);
-    Events.emit('MatchFinished', { won, tournamentId: match.tournamentId });
-    logMsg(won ? `${match.players.self.name} wins!` : `${match.players.opp.name} wins.`);
-    renderMatch(document.getElementById('page-match'));
-    await UI.dialog({
-      title: won ? 'Victory!' : 'Defeat',
-      body: won ? 'You took all your prize cards. Well played!' : 'Your opponent claimed the win this time.',
-      actions: [{ label: match.tournamentId ? 'Continue Tournament' : 'Back to Play', variant:'primary', value:true }]
-    });
-    if(match.tournamentId) Tournament.reportMatchResult(match.tournamentId, match.matchId, won);
-    else UI.navigate('play');
+    Persistence.saveUserData(Auth.currentUser.id,d);
+    Events.emit('MatchFinished',{won,tournamentId:match.tournamentId});
+    const title=won?'🏆 Victory!':'Defeat';
+    const body=won?`You claimed all your prize cards. ${match.tournamentId?'Advancing in the tournament…':'Well played!'}`:`${match.players.opp.name} won this time. ${match.tournamentId?'You\'ve been eliminated.':'Try again!'}`;
+    if(won&&!match.tournamentId){
+      Economy.grant(5,'Match Reward','quick-match','Win bonus');
+      UI.toast('You won! +NZ$5.00 bonus','success');
+    }
+    render();
+    await UI.dialog({ title, body, actions:[{label:match.tournamentId?'Continue Tournament':'Back to Home',variant:'primary',value:true}] });
+    if(match.tournamentId) global.Tournament&&Tournament.reportMatchResult(match.tournamentId,match.matchId,won);
+    else UI.navigate('home');
   }
 
-  function buildInitialState(deck, opts){
-    const selfList = expandDeck(deck);
-    const oppDeck = opts.opponentDeck || pickAiDeck(deck);
-    const oppList = expandDeck(oppDeck);
-    const state = {
-      turn: 1, activeSide: 'self', winner: null, log: [], turnFlags: { attacked:false },
-      deckId: deck.id, tournamentId: opts.tournamentId || null, matchId: opts.matchId || null,
-      players: {
-        self: makePlayer(Auth.currentUser.nickname || 'You', selfList, false),
-        opp: makePlayer(opts.opponentName || 'AI Opponent', oppList, true)
+  function buildState(deck, aiDeck, opts){
+    const selfList=expand(deck), oppList=expand(aiDeck);
+    return {
+      turn:1, activeSide:'self', winner:null, log:[], turnFlags:{attacked:false},
+      deckId:deck.id, tournamentId:opts.tournamentId||null, matchId:opts.matchId||null,
+      players:{
+        self:makePlayer(Auth.currentUser.nickname||'You',selfList,false),
+        opp:makePlayer(opts.opponentName||'AI Trainer',oppList,true)
       }
     };
-    return state;
   }
-  function makePlayer(name, deckList, isAI){
-    const shuffled = shuffle([...deckList]);
-    const hand = shuffled.splice(0, HAND_START);
-    return { name, isAI, deck: shuffled, hand, discard: [], active:null, bench:[], prizesRemaining: PRIZES, energyAttachedThisTurn:false, mustDrawNext:false };
+  function makePlayer(name,list,isAI){
+    const sh=shuffle([...list]);
+    return { name, isAI, deck:sh.slice(HAND_START), hand:sh.slice(0,HAND_START), discard:[], active:null, bench:[], prizesRemaining:PRIZES, energyAttachedThisTurn:false, mustDrawNext:false };
   }
-  function expandDeck(deck){
-    const list = [];
-    Object.entries(deck.cards).forEach(([cardId, qty]) => { for(let i=0;i<qty;i++) list.push(cardId); });
-    return list;
-  }
-  function pickAiDeck(playerDeck){
-    // Give the AI a starter deck of the same shape so matches are winnable and legal.
-    const kinds = Object.keys(DeckBuilder.STARTERS);
-    const kind = kinds[Math.floor(Math.random()*kinds.length)];
-    const all = DeckBuilder.getDecks();
-    return all.find(d => d.isStarter) || playerDeck;
-  }
-  function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+  function expand(deck){ const l=[]; Object.entries(deck.cards).forEach(([id,q])=>{ for(let i=0;i<q;i++) l.push(id); }); return l; }
+  function pickAiDeck(playerDeck){ return DeckBuilder.getDecks().find(d=>d.isStarter&&d.id!==playerDeck.id)||DeckBuilder.getDecks()[0]||playerDeck; }
+  function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 
   /* ---------- Match page rendering ---------- */
-  function renderMatch(container){
-    if(!container) return;
-    if(!match){ container.innerHTML = ''; container.appendChild(UI.emptyState({ title:'No active match', body:'Start one from Play.', actionLabel:'Go to Play', onAction:()=>UI.navigate('play') })); return; }
-    const self = match.players.self, opp = match.players.opp;
-    const selfCard = self.active ? Binder._getMeta(self.active.cardId) : null;
-    const oppCard = opp.active ? Binder._getMeta(opp.active.cardId) : null;
-    const myTurn = match.activeSide === 'self' && !match.winner;
+  let selectedHandCard=null;
 
-    container.innerHTML = `
+  function render(){
+    const container=document.getElementById('page-match');
+    if(!container||!container.classList.contains('active')) return;
+    if(!match){ container.innerHTML=''; container.appendChild(UI.emptyState({title:'No active match',body:'Start one from Play.',actionLabel:'Go to Play',onAction:()=>UI.navigate('play')})); return; }
+    const self=match.players.self, opp=match.players.opp;
+    const myTurn=match.activeSide==='self'&&!match.winner;
+
+    container.innerHTML=`
       <div class="match-board">
         <div class="match-hud">
-          <span>Turn ${match.turn} — ${match.players[match.activeSide].name}</span>
-          <span class="prize-row">${Array.from({length:PRIZES}).map((_,i)=>`<span class="prize-dot ${i < (PRIZES-opp.prizesRemaining) ? 'taken':''}"></span>`).join('')}</span>
+          <span class="turn-indicator">Turn ${match.turn}</span>
+          <span style="font-size:11px;color:var(--text-dim);">${match.players[match.activeSide].name}'s turn</span>
+          <div class="prize-pips" title="Your prizes remaining">
+            ${Array.from({length:PRIZES},(_,i)=>`<span class="prize-pip ${i<(PRIZES-self.prizesRemaining)?'taken':''}"></span>`).join('')}
+          </div>
         </div>
 
-        <div class="zone-row opp-zone">
-          <div class="zone"><b style="font-size:12px;">${UI.escapeHtml(opp.name)}</b><div style="font-size:11px;color:var(--text-dim);">Deck ${opp.deck.length} · Hand ${opp.hand.length}</div></div>
-          <div class="bench" id="opp-bench"></div>
+        <div style="text-align:center;font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);padding:2px 0;">
+          ${UI.escapeHtml(opp.name)} — Deck ${opp.deck.length} · Hand ${opp.hand.length} · Prizes ${opp.prizesRemaining}
         </div>
 
-        <div class="field-row">
-          <div class="slot active-slot self" id="self-active"></div>
-          <div class="slot active-slot opp" id="opp-active"></div>
+        <div class="field-zones">
+          <div class="side-zones">
+            <div class="side-label">Opponent Bench</div>
+            <div class="bench-row" id="opp-bench"></div>
+          </div>
+          <div class="active-zone">
+            <div class="slot active-slot" id="opp-active"></div>
+            <div class="vs-divider">VS</div>
+            <div class="slot active-slot" id="self-active"></div>
+          </div>
+          <div class="side-zones">
+            <div class="side-label">Your Bench</div>
+            <div class="bench-row" id="self-bench"></div>
+          </div>
         </div>
-
-        <div class="zone-row self-zone">
-          <div class="bench" id="self-bench"></div>
-          <div class="zone"><b style="font-size:12px;">${UI.escapeHtml(self.name)}</b><div style="font-size:11px;color:var(--text-dim);">Deck ${self.deck.length} · Prizes ${self.prizesRemaining}</div></div>
-        </div>
-
-        <div class="match-log" id="match-log">${match.log.slice(-6).map(UI.escapeHtml).join('<br>')}</div>
 
         <div class="hand-row" id="self-hand"></div>
 
         <div class="match-actions" id="match-actions"></div>
-      </div>
-    `;
+        ${selectedHandCard ? `<div class="match-hint" id="match-hint"></div>` : ''}
+        <div class="match-log" id="match-log">${match.log.slice(-5).map(m=>`<div>${UI.escapeHtml(m)}</div>`).join('')}</div>
 
-    renderSlot('self-active', self.active, true);
+        ${match.winner ? `<div class="alert-banner ${match.winner==='self'?'success':'error'}" style="text-align:center;font-size:15px;font-weight:700;">${match.winner==='self'?'🏆 You win!':'💀 Opponent wins'}</div>` : ''}
+      </div>`;
+
     renderSlot('opp-active', opp.active, false);
-    renderBench('self-bench', self.bench, true);
+    renderSlot('self-active', self.active, true);
     renderBench('opp-bench', opp.bench, false);
+    renderBench('self-bench', self.bench, true);
     renderHand(self, myTurn);
-    renderActions(self, opp, myTurn);
-    const log = container.querySelector('#match-log');
-    if(log) log.scrollTop = log.scrollHeight;
+    renderActions(self, myTurn);
+    const log=container.querySelector('#match-log');
+    if(log) log.scrollTop=log.scrollHeight;
   }
 
   function renderSlot(id, slot, mine){
-    const el = document.getElementById(id);
-    if(!el) return;
-    if(!slot){ el.className = 'slot active-slot ' + (mine?'self':'opp'); el.innerHTML = ''; return; }
-    const card = Binder._getMeta(slot.cardId);
-    el.className = 'slot active-slot filled ' + (mine?'self':'opp');
-    el.innerHTML = `<img src="${UI.cardImg(card)}" onerror="this.style.opacity=0">
-      ${slot.damage ? `<span class="dmg">${slot.damage}</span>` : ''}
-      ${slot.energy.length ? `<span class="energy-count">${slot.energy.length}</span>` : ''}`;
-    if(mine) el.onclick = () => mine && onSelfActiveClick(slot);
+    const el=document.getElementById(id); if(!el) return;
+    if(!slot){ el.className='slot active-slot'+(mine?' empty-hint':''); el.innerHTML=''; return; }
+    const card=Binder._getMeta(slot.cardId);
+    el.className='slot active-slot filled'+(mine&&selectedHandCard?' selectable':'');
+    el.innerHTML=`<img src="${UI.escapeHtml(UI.cardImg(card))}" alt="${UI.escapeHtml(card?card.name:'')}" onerror="this.style.opacity=0.1">
+      ${slot.damage?`<span class="dmg-counter">${slot.damage}dmg</span>`:''}
+      ${slot.energy.length?`<div class="energy-pips">${slot.energy.map(e=>`<span class="energy-pip" style="background:var(--t-${e.toLowerCase()},var(--t-colorless));" title="${e}"></span>`).join('')}</div>`:''}`;
+    if(mine) el.onclick=()=>onActiveClick(slot,mine);
   }
+
   function renderBench(id, bench, mine){
-    const el = document.getElementById(id);
-    if(!el) return;
-    el.innerHTML = '';
+    const el=document.getElementById(id); if(!el) return; el.innerHTML='';
     for(let i=0;i<BENCH_MAX;i++){
-      const slot = bench[i];
-      const s = document.createElement('div'); s.className = 'slot' + (slot?' filled':'');
+      const slot=bench[i]; const s=document.createElement('div');
+      s.className='slot'+(slot?' filled':'')+(mine&&selectedHandCard&&slot?' selectable':'');
       if(slot){
-        const card = Binder._getMeta(slot.cardId);
-        s.innerHTML = `<img src="${UI.cardImg(card)}" onerror="this.style.opacity=0">${slot.damage?`<span class="dmg">${slot.damage}</span>`:''}${slot.energy.length?`<span class="energy-count">${slot.energy.length}</span>`:''}`;
-        if(mine) s.onclick = () => onSelfBenchClick(slot);
+        const card=Binder._getMeta(slot.cardId);
+        s.innerHTML=`<img src="${UI.escapeHtml(UI.cardImg(card))}" onerror="this.style.opacity=0.1">
+          ${slot.damage?`<span class="dmg-counter">${slot.damage}dmg</span>`:''}
+          ${slot.energy.length?`<div class="energy-pips">${slot.energy.map(e=>`<span class="energy-pip" style="background:var(--t-${e.toLowerCase()},var(--t-colorless));"></span>`).join('')}</div>`:''}`;
+        if(mine) s.onclick=()=>onBenchClick(slot);
       }
       el.appendChild(s);
     }
   }
 
-  let selectedHandCard = null, pendingAction = null;
   function renderHand(self, myTurn){
-    const row = document.getElementById('self-hand');
-    row.innerHTML = '';
-    self.hand.forEach(cardId => {
-      const card = Binder._getMeta(cardId);
-      if(!card) return;
-      const el = document.createElement('div');
-      el.className = 'hand-card' + (selectedHandCard === cardId ? '' : '');
-      el.style.outline = selectedHandCard === cardId ? '2px solid var(--accent)' : 'none';
-      el.innerHTML = `<img src="${UI.cardImg(card)}" onerror="this.style.opacity=0">`;
-      el.title = card.name;
-      el.onclick = () => { if(!myTurn) return; selectedHandCard = selectedHandCard === cardId ? null : cardId; renderMatch(document.getElementById('page-match')); };
+    const row=document.getElementById('self-hand'); if(!row) return; row.innerHTML='';
+    self.hand.forEach(cardId=>{
+      const card=Binder._getMeta(cardId); if(!card) return;
+      const el=document.createElement('div');
+      el.className='hand-card'+(selectedHandCard===cardId?' selected':'');
+      el.innerHTML=`<img src="${UI.escapeHtml(UI.cardImg(card))}" alt="${UI.escapeHtml(card.name)}" onerror="this.style.opacity=0.1" title="${UI.escapeHtml(card.name)}">`;
+      el.onclick=()=>{ if(!myTurn) return; selectedHandCard=selectedHandCard===cardId?null:cardId; render(); };
       row.appendChild(el);
     });
   }
 
-  function onSelfActiveClick(slot){
-    if(match.activeSide !== 'self') return;
-    if(selectedHandCard){
-      const card = Binder._getMeta(selectedHandCard);
-      if(card.evolvesFrom) Engine.evolve(selectedHandCard, slot.uid);
-      else if(isEnergyLike(card)) Engine.attachEnergy(selectedHandCard, slot.uid);
-      selectedHandCard = null;
-    }
-  }
-  function onSelfBenchClick(slot){
-    if(match.activeSide !== 'self') return;
-    if(selectedHandCard){
-      const card = Binder._getMeta(selectedHandCard);
-      if(card.evolvesFrom) Engine.evolve(selectedHandCard, slot.uid);
-      else if(isEnergyLike(card)) Engine.attachEnergy(selectedHandCard, slot.uid);
-      selectedHandCard = null;
-    } else {
-      Engine.retreat(slot.uid);
-    }
-  }
-
-  function renderActions(self, opp, myTurn){
-    const bar = document.getElementById('match-actions');
-    bar.innerHTML = '';
+  function renderActions(self, myTurn){
+    const bar=document.getElementById('match-actions'); if(!bar) return; bar.innerHTML='';
+    const hint=document.getElementById('match-hint');
     if(!myTurn){
-      bar.innerHTML = `<span style="color:var(--text-dim); font-size:13px;">Waiting for ${match.players[match.activeSide].name}…</span>`;
+      bar.innerHTML=`<span class="text-dim" style="font-size:12.5px;">Waiting for ${UI.escapeHtml(match.players.opp.name)}…</span>`;
       return;
     }
     if(selectedHandCard){
-      const card = Binder._getMeta(selectedHandCard);
-      if(cardStage(card) === 'Basic' && card.supertype === 'Pokémon'){
-        addBtn(bar, `Play ${card.name} to Bench`, () => { Engine.playBasic(selectedHandCard, !self.active); selectedHandCard = null; });
+      const card=Binder._getMeta(selectedHandCard);
+      if(cardStage(card)==='Basic'&&card.supertype==='Pokémon'){
+        addBtn(bar,`Play ${card.name} to ${!self.active?'Active':'Bench'}`,()=>{ Engine.playBasic(selectedHandCard,!self.active); selectedHandCard=null; });
       } else if(card.evolvesFrom){
-        bar.innerHTML += `<span style="color:var(--text-dim); font-size:12px; align-self:center;">Tap a Pokémon in play to evolve it into ${UI.escapeHtml(card.name)}</span>`;
-      } else if(card.supertype === 'Trainer' || (!card.supertype && !isEnergyLike(card))){
-        addBtn(bar, `Play ${card.name}`, () => { Engine.playTrainer(selectedHandCard); selectedHandCard = null; });
+        if(hint) hint.textContent=`Tap a ${card.evolvesFrom} in play to evolve into ${card.name}.`;
+      } else if(isEnergyLike(card)){
+        if(hint) hint.textContent=`Tap a Pokémon in play to attach ${energyType(card)} Energy.`;
       } else {
-        addBtn(bar, 'Cancel selection', () => { selectedHandCard = null; renderMatch(document.getElementById('page-match')); });
+        addBtn(bar,`Play ${card.name}`,()=>{ Engine.playTrainer(selectedHandCard); selectedHandCard=null; });
       }
+      addBtn(bar,'Cancel',()=>{ selectedHandCard=null; render(); },'btn-ghost');
+    } else {
+      if(self.active&&!match.turnFlags.attacked){
+        const card=Binder._getMeta(self.active.cardId);
+        (card.attacks||[]).forEach((atk,i)=>{
+          const usable=Rules.attackCostMet(self.active,atk);
+          addBtn(bar,`${atk.name} (${atk.damage||0})`,()=>Engine.attack(i),!usable,'btn-primary');
+        });
+      }
+      addBtn(bar,'End Turn',()=>Engine.endTurn(),'',true);
+      addBtn(bar,'Concede',()=>UI.confirmDialog('Concede?','This counts as a loss.','Concede',true).then(ok=>ok&&Engine.concede()),'btn-ghost');
     }
-    if(self.active && !match.turnFlags.attacked){
-      const card = Binder._getMeta(self.active.cardId);
-      (card.attacks||[]).forEach((atk, i) => {
-        const usable = Rules.attackCostMet(self.active, atk);
-        addBtn(bar, `${atk.name} (${atk.damage||0})`, () => Engine.attack(i), !usable);
-      });
-    }
-    addBtn(bar, 'End Turn', () => Engine.endTurn());
-    addBtn(bar, 'Concede', () => UI.confirmDialog('Concede match?', 'This immediately ends the match as a loss.', 'Concede').then(ok => ok && Engine.concede()), false, 'btn-ghost');
   }
+
   function addBtn(bar, label, onClick, disabled, variant){
-    const b = document.createElement('button');
-    b.className = 'btn ' + (variant || 'btn-secondary') + ' btn-sm';
-    b.textContent = label; b.disabled = !!disabled; b.onclick = onClick;
+    const b=document.createElement('button');
+    b.className='btn '+(typeof disabled==='string'?disabled:variant||'btn-secondary')+' btn-sm';
+    b.textContent=label;
+    b.disabled=disabled===true;
+    b.onclick=onClick;
     bar.appendChild(b);
   }
 
-  UI.registerPage('match', renderMatch);
-  global.Engine = Engine;
+  function onActiveClick(slot, mine){
+    if(!mine||!selectedHandCard) return;
+    const card=Binder._getMeta(selectedHandCard);
+    if(card.evolvesFrom) Engine.evolve(selectedHandCard,slot.uid);
+    else if(isEnergyLike(card)) Engine.attachEnergy(selectedHandCard,slot.uid);
+    selectedHandCard=null;
+  }
+  function onBenchClick(slot){
+    if(!selectedHandCard){ Engine.retreat(slot.uid); return; }
+    const card=Binder._getMeta(selectedHandCard);
+    if(card.evolvesFrom) Engine.evolve(selectedHandCard,slot.uid);
+    else if(isEnergyLike(card)) Engine.attachEnergy(selectedHandCard,slot.uid);
+    selectedHandCard=null;
+  }
+
+  UI.registerPage('match', container=>{ render(); });
+  global.Engine=Engine;
 })(window);
