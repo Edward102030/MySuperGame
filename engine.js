@@ -2,9 +2,9 @@
    engine.js — GameState, Rules Engine, Match Controller
    ============================================================ */
 (function(global){
-  const BENCH_MAX = 3;
-  const HAND_START = 4;
-  const PRIZES = 3;
+  const BENCH_MAX = 5;
+  const HAND_START = 7;
+  const PRIZES = 6;
 
   /* ---------- Helpers ---------- */
   function uid(){ return 's_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
@@ -46,7 +46,13 @@
       return dmg;
     },
     isKO(slot, card){ return slot.damage>=(parseInt(card.hp||'0')); },
-    prizesForKO(card){ return /\bex\b|\bv\b|\bvmax\b|\bvstar\b/i.test(card.name||card.subtypes||'')?2:1; },
+    prizesForKO(card){
+      const name = card.name || '';
+      const subtypes = (card.subtypes || []).join(' ');
+      if(/vmax/i.test(name) || /vmax/i.test(subtypes)) return 3;
+      if(/\bex\b|\bv\b|\bvstar\b|\bgx\b/i.test(name) || /\bex\b|\bv\b|\bvstar\b|\bgx\b/i.test(subtypes)) return 2;
+      return 1;
+    },
     checkWinner(state){
       for(const side of ['self','opp']){
         const p=state.players[side]; const other=side==='self'?'opp':'self';
@@ -263,8 +269,16 @@
     };
   }
   function makePlayer(name,list,isAI){
-    const sh=shuffle([...list]);
-    return { name, isAI, deck:sh.slice(HAND_START), hand:sh.slice(0,HAND_START), discard:[], active:null, bench:[], prizesRemaining:PRIZES, energyAttachedThisTurn:false, mustDrawNext:false };
+    let shuffled, hand, deck;
+    let attempts = 0;
+    // Real-rule mulligan: a starting hand with no Basic Pokémon must be reshuffled and redrawn.
+    do{
+      shuffled = shuffle([...list]);
+      hand = shuffled.slice(0, HAND_START);
+      deck = shuffled.slice(HAND_START);
+      attempts++;
+    } while(attempts < 8 && !hand.some(id => { const c = Binder._getMeta(id); return c && cardStage(c) === 'Basic'; }));
+    return { name, isAI, deck, hand, discard:[], active:null, bench:[], prizesRemaining:PRIZES, energyAttachedThisTurn:false, mustDrawNext:false };
   }
   function expand(deck){ const l=[]; Object.entries(deck.cards).forEach(([id,q])=>{ for(let i=0;i<q;i++) l.push(id); }); return l; }
   function pickAiDeck(playerDeck){ return DeckBuilder.getDecks().find(d=>d.isStarter&&d.id!==playerDeck.id)||DeckBuilder.getDecks()[0]||playerDeck; }
