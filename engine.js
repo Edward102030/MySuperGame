@@ -247,9 +247,9 @@
     Events.emit('MatchFinished',{won,tournamentId:match.tournamentId});
     const title=won?'🏆 Victory!':'Defeat';
     const body=won?`You claimed all your prize cards. ${match.tournamentId?'Advancing in the tournament…':'Well played!'}`:`${match.players.opp.name} won this time. ${match.tournamentId?'You\'ve been eliminated.':'Try again!'}`;
-    if(won&&!match.tournamentId){
-      Economy.grant(5,'Match Reward','quick-match','Win bonus');
-      UI.toast('You won! +NZ$5.00 bonus','success');
+    if(won){
+      Economy.grant(20,'Match Reward', match.tournamentId ? 'tournament-round' : 'quick-match', match.tournamentId ? 'Round win bonus' : 'Match win bonus');
+      UI.toast('You won! +NZ$20.00 bonus','success');
     }
     render();
     await UI.dialog({ title, body, actions:[{label:match.tournamentId?'Continue Tournament':'Back to Home',variant:'primary',value:true}] });
