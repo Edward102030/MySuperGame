@@ -1,5 +1,7 @@
 /* ============================================================
    binder.js — Collection Manager + Binder page
+   New: filter by specific set with a completion progress bar,
+   and sell duplicate copies for cash (always keeps at least 1).
    ============================================================ */
 (function(global){
 
@@ -35,6 +37,21 @@
       Events.emit('QuantityChanged', { cardId });
     },
 
+    /** Sells duplicate copies for cash at 60% of market value. Always keeps at least 1 copy. */
+    sellCard(cardId, qty = 1){
+      const d = data();
+      const entry = d.collection[cardId];
+      if(!entry || entry.quantity <= 1) throw new Error('Keep at least one copy — only duplicates can be sold.');
+      const sellQty = Math.min(qty, entry.quantity - 1);
+      if(sellQty <= 0) throw new Error('No duplicates available to sell.');
+      const card = Binder._getMeta(cardId);
+      const unitPrice = Math.round(Api.marketPrice(card) * 0.6 * 100) / 100;
+      const total = Math.round(unitPrice * sellQty * 100) / 100;
+      Binder.removeCard(cardId, sellQty);
+      Economy.grant(total, 'Card Sale', cardId, `Sold ${sellQty}× ${card.name}`);
+      return total;
+    },
+
     toggleFavorite(cardId){
       const d = data();
       if(!d.collection[cardId]) return;
@@ -68,7 +85,7 @@
         .filter(x => x.card);
     },
 
-    query({ term='', type='all', rarity='all', favoritesOnly=false, sort='name-asc', newOnly=false } = {}){
+    query({ term='', type='all', rarity='all', favoritesOnly=false, sort='name-asc', newOnly=false, setId='all' } = {}){
       let rows = Binder.getOwned();
       const norm = term.trim().toLowerCase();
       if(norm) rows = rows.filter(({card}) => card.name.toLowerCase().includes(norm) || (card.set && card.set.name.toLowerCase().includes(norm)));
@@ -76,6 +93,7 @@
       if(rarity !== 'all') rows = rows.filter(({card}) => (card.rarity||'').toLowerCase() === rarity.toLowerCase());
       if(favoritesOnly) rows = rows.filter(({entry}) => entry.favorite);
       if(newOnly) rows = rows.filter(({entry}) => entry.isNew);
+      if(setId !== 'all') rows = rows.filter(({card}) => card.set && card.set.id === setId);
       const sorters = {
         'name-asc':   (a,b) => a.card.name.localeCompare(b.card.name),
         'name-desc':  (a,b) => b.card.name.localeCompare(a.card.name),
@@ -99,14 +117,28 @@
         if(price > mostValuableValue){ mostValuableValue = price; mostValuable = card; }
       }
       return { uniqueCards: owned.length, totalCards: totalQty, totalValue, mostValuable, mostValuableValue: Math.max(0, mostValuableValue) };
+    },
+
+    /** Unique cards owned in a set vs. that set's real printed total. */
+    setProgress(setId, setPrintedTotal){
+      const owned = Binder.getOwned().filter(({card}) => card.set && card.set.id === setId);
+      const total = setPrintedTotal || owned.length || 1;
+      return { owned: owned.length, total, pct: Math.min(100, Math.round((owned.length/total)*100)) };
     }
   };
 
   /* ---------- Binder page ---------- */
-  let state = { term:'', type:'all', rarity:'all', favoritesOnly:false, sort:'name-asc', newOnly:false };
+  let state = { term:'', type:'all', rarity:'all', favoritesOnly:false, sort:'name-asc', newOnly:false, setId:'all' };
+  let cachedSets = null;
 
-  function render(container){
+  async function render(container){
+    if(!cachedSets){
+      try{ cachedSets = await Api.getSets(); }catch(e){ cachedSets = []; }
+    }
     const stats = Binder.stats();
+    const ownedSetIds = new Set(Binder.getOwned().map(({card}) => card.set && card.set.id).filter(Boolean));
+    const ownedSets = cachedSets.filter(s => ownedSetIds.has(s.id));
+
     container.innerHTML = `
       <div class="section-head">
         <h2>Binder</h2>
@@ -120,6 +152,10 @@
       </div>
       <div class="toolbar">
         <div class="search-wrap"><input type="text" class="search-input" id="binder-search" placeholder="Search cards…" value="${UI.escapeHtml(state.term)}"></div>
+        <select class="select-input" id="binder-set">
+          <option value="all">All Sets</option>
+          ${ownedSets.map(s=>`<option value="${s.id}" ${state.setId===s.id?'selected':''}>${UI.escapeHtml(s.name)}</option>`).join('')}
+        </select>
         <select class="select-input" id="binder-type">
           ${['all','Fire','Water','Grass','Lightning','Psychic','Fighting','Darkness','Metal','Dragon','Colorless'].map(t=>`<option value="${t.toLowerCase()}" ${state.type===t.toLowerCase()||state.type===t?'selected':''}>${t==='all'?'All Types':t}</option>`).join('')}
         </select>
@@ -130,21 +166,38 @@
           <option value="value-asc" ${state.sort==='value-asc'?'selected':''}>Lowest Value</option>
           <option value="qty-desc" ${state.sort==='qty-desc'?'selected':''}>Most Owned</option>
           <option value="recent" ${state.sort==='recent'?'selected':''}>Recently Obtained</option>
-          <option value="set" ${state.sort==='set'?'selected':''}>By Set</option>
         </select>
       </div>
       <div class="toolbar" style="margin-top:-8px;">
         <button class="chip ${state.favoritesOnly?'active':''}" id="binder-fav">★ Favorites</button>
         <button class="chip ${state.newOnly?'active':''}" id="binder-new">✦ New</button>
       </div>
+      <div id="binder-set-progress"></div>
       <div id="binder-results"></div>
     `;
     wireToolbar(container);
+    renderSetProgress(container);
     renderResults(container);
+  }
+
+  function renderSetProgress(container){
+    const el = container.querySelector('#binder-set-progress');
+    if(state.setId === 'all'){ el.innerHTML = ''; return; }
+    const set = cachedSets.find(s => s.id === state.setId);
+    const prog = Binder.setProgress(state.setId, set && set.printedTotal);
+    el.innerHTML = `
+      <div class="card-panel mb-16">
+        <div class="flex justify-between items-center mb-8">
+          <b style="font-size:13.5px;">${UI.escapeHtml(set ? set.name : 'Set')} Completion</b>
+          <span class="text-mono text-dim" style="font-size:12px;">${prog.owned}/${prog.total} (${prog.pct}%)</span>
+        </div>
+        <div class="progress-bar"><div class="progress-bar-fill ${prog.pct>=100?'success':''}" style="width:${prog.pct}%"></div></div>
+      </div>`;
   }
 
   function wireToolbar(container){
     container.querySelector('#binder-search').addEventListener('input', UI.debounce(e => { state.term = e.target.value; renderResults(container); }, 200));
+    container.querySelector('#binder-set').addEventListener('change', e => { state.setId = e.target.value; renderSetProgress(container); renderResults(container); });
     container.querySelector('#binder-type').addEventListener('change', e => { state.type = e.target.value; renderResults(container); });
     container.querySelector('#binder-sort').addEventListener('change', e => { state.sort = e.target.value; renderResults(container); });
     container.querySelector('#binder-fav').addEventListener('click', e => { state.favoritesOnly = !state.favoritesOnly; e.target.classList.toggle('active'); renderResults(container); });
@@ -174,7 +227,7 @@
           <span class="truncate">${UI.escapeHtml(card.set ? card.set.name : '')}</span>
           <span>${Economy.format(Api.marketPrice(card) * entry.quantity)}</span>
         </div>`;
-      el.addEventListener('click', () => { Binder.clearNew(card.id); openDetail(entry, card); });
+      el.addEventListener('click', () => { Binder.clearNew(card.id); openDetail(entry, card, container); });
       grid.appendChild(el);
     });
     results.innerHTML = '';
@@ -183,12 +236,13 @@
 
   function isHolo(card){ return /(holo|rare|ex|ultra|secret|full.?art|double|shiny|promo|special)/i.test(card.rarity||''); }
 
-  async function openDetail(entry, card){
+  async function openDetail(entry, card, pageContainer){
     const body = document.createElement('div');
     body.style.cssText = 'display:flex; gap:18px; align-items:flex-start;';
     const imgWrap = document.createElement('div');
     imgWrap.innerHTML = `<img src="${UI.escapeHtml(UI.cardImg(card,'large'))}" style="width:130px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);" onerror="this.style.opacity=0.1">`;
     const info = document.createElement('div');
+    const sellPrice = Math.round(Api.marketPrice(card) * 0.6 * 100) / 100;
     info.style.cssText = 'font-size:13px; color:var(--text-dim); line-height:1.9; flex:1;';
     info.innerHTML = `
       <div style="color:var(--text);font-size:16px;font-weight:700;margin-bottom:6px;">${UI.escapeHtml(card.name)}</div>
@@ -200,18 +254,22 @@
       <div class="mt-8">Owned: <b style="color:var(--text)">×${entry.quantity}</b></div>
       <div>Market value: <b style="color:var(--success)">${Economy.format(Api.marketPrice(card))}</b></div>
       <div>Total value: <b style="color:var(--success)">${Economy.format(Api.marketPrice(card) * entry.quantity)}</b></div>
+      ${entry.quantity > 1 ? `<div>Sell price (60%): <b style="color:var(--warning)">${Economy.format(sellPrice)}</b> each</div>` : ''}
       <div class="mt-8">First obtained: ${new Date(entry.dateFirstObtained).toLocaleDateString()}</div>
     `;
     body.appendChild(imgWrap);
     body.appendChild(info);
-    const choice = await UI.dialog({
-      title: 'Card Details', body,
-      actions:[
-        { label:'Close', variant:'ghost', value:'close' },
-        { label: entry.favorite ? '★ Unfavorite' : '☆ Favorite', variant:'secondary', value:'fav' }
-      ]
-    });
-    if(choice === 'fav'){ Binder.toggleFavorite(card.id); UI.navigate('binder'); }
+    const actions = [{ label:'Close', variant:'ghost', value:'close' }, { label: entry.favorite ? '★ Unfavorite' : '☆ Favorite', variant:'secondary', value:'fav' }];
+    if(entry.quantity > 1) actions.push({ label:`Sell 1 for ${Economy.format(sellPrice)}`, variant:'primary', value:'sell' });
+    const choice = await UI.dialog({ title: 'Card Details', body, actions });
+    if(choice === 'fav'){ Binder.toggleFavorite(card.id); render(pageContainer); }
+    if(choice === 'sell'){
+      try{
+        const gained = Binder.sellCard(card.id, 1);
+        UI.toast(`Sold for ${Economy.format(gained)}`, 'success');
+        render(pageContainer);
+      }catch(e){ UI.toast(e.message, 'error'); }
+    }
   }
 
   UI.registerPage('binder', render);
