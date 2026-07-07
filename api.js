@@ -61,6 +61,23 @@
       throw err;
     }
   }
+  /** Realistic ungraded-bulk price floor for cards with no TCGplayer listing.
+      Community bulk pricing (not fabricated precision, just a sane minimum). */
+  function priceFloor(card){
+    if(!card) return 0;
+    if(card.supertype === 'Energy') return 0.10;
+    // Regex (not exact string equality) so a differently-encoded "é" from
+    // copy/paste or the API response can never silently break this check.
+    const st = String(card.supertype||'');
+    if(!/^pok.mon$/i.test(st) && st !== 'Trainer') return 0;
+    const r = (card.rarity||'').toLowerCase();
+    if(r.includes('common')) return 0.20;
+    if(r.includes('uncommon')) return 0.40;
+    if(r.includes('holo')) return 1.50;
+    if(r.includes('rare')) return 0.75;
+    return 0.30;
+  }
+
   function delay(ms){ return new Promise(r => setTimeout(r, ms)); }
 
   const Api = {
@@ -125,9 +142,14 @@
       return (variant && (variant.market || variant.mid)) || 0;
     },
 
-    /** Real market price converted to NZD — this is what the rest of the app should use. */
+    /** Real market price converted to NZD — this is what the rest of the app should use.
+        Falls back to a rarity-based floor (not $0.00) when a card genuinely has no
+        TCGplayer listing, since even bulk commons realistically sell for a few
+        cents/dollars ungraded — showing $0.00 would be misleadingly inaccurate. */
     marketPrice(card){
-      return Math.round(Api.marketPriceUSD(card) * getExchangeRate() * 100) / 100;
+      const usd = Api.marketPriceUSD(card);
+      if(usd > 0) return Math.round(usd * getExchangeRate() * 100) / 100;
+      return priceFloor(card);
     },
 
     formatCurrency(amount){
