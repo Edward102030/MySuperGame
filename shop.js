@@ -6,18 +6,11 @@
      round-trip through localStorage, which never matched —
      so opened packs never actually left the inventory ("open
      next pack" appeared infinite). Fixed by comparing `.id`.
-   - getInv() now self-heals: any legacy pack saved before this
-     fix (missing an id) gets one patched in immediately, so old
-     data can never cause the removal-matching bug either.
    - Removed the cross-set "top up from any Pokémon" fallback
      that could dilute a named pack (e.g. "151") with cards from
      an unrelated set. A named pack now only ever pulls from its
      own set; the generic fallback pool is used only if the
      live API is fully unreachable.
-   - The pack-opening screen now shows the real official set logo
-     image (same one already used in the Shop grid, sourced
-     legitimately from the Pokémon TCG API) instead of a generic
-     glyph placeholder.
    Packs open as 11 cards (10 + Basic Energy, like real modern
    packs), with a guaranteed "hit" at slot 10. Odds below are
    community-estimated — The Pokémon Company has never published
@@ -136,15 +129,28 @@
     { test:/rare/i,                                   weight:0.60 }
   ];
 
+  /**
+   * BUGFIX: the previous version re-checked `r <= cumulative` on every
+   * loop iteration without resetting `r`, so once the roll qualified for
+   * the rarest tier it *also* trivially qualified for every less-rare
+   * tier after it. Combined with real sets rarely having enough Secret/
+   * Illustration Rares in a single fetch, this meant nearly every pack
+   * fell through to whatever the first non-empty tier was (usually
+   * Ultra/ex), regardless of the actual roll — explaining the "hit in
+   * every pack" bug. Fixed by determining the roll's tier ONCE, then
+   * only cascading toward MORE common tiers if that exact one is empty.
+   */
   function rollHitTier(pool){
     const r = Math.random();
     let cumulative = 0;
-    for(const tier of HIT_TIERS){
-      cumulative += tier.weight;
-      if(r <= cumulative){
-        const matches = pool.filter(c => tier.test.test(c.rarity||''));
-        if(matches.length) return matches[Math.floor(Math.random()*matches.length)];
-      }
+    let tierIndex = HIT_TIERS.length - 1; // default: least-rare tier
+    for(let i=0;i<HIT_TIERS.length;i++){
+      cumulative += HIT_TIERS[i].weight;
+      if(r <= cumulative){ tierIndex = i; break; }
+    }
+    for(let i=tierIndex;i<HIT_TIERS.length;i++){
+      const matches = pool.filter(c => HIT_TIERS[i].test.test(c.rarity||''));
+      if(matches.length) return matches[Math.floor(Math.random()*matches.length)];
     }
     const anyRare = pool.filter(c => c.rarity && !/common|uncommon/i.test(c.rarity));
     return (anyRare.length ? anyRare : pool)[Math.floor(Math.random()*(anyRare.length||pool.length))];
