@@ -1,24 +1,37 @@
 /* ============================================================
    deckbuilder.js — Deck Builder (independent from gameplay)
+   Real Pokémon TCG deck rules: 60 cards, max 4 copies of any
+   card EXCEPT Basic Energy (unlimited), per official rules.
+
+   Starter decks: exactly 2 copies of the named ex card (real
+   printing, real price — see note below), with every OTHER
+   card in the deck capped at NZ$2.00 using live market data.
+   Note: an authentic Charizard ex is a chase card and will not
+   itself be under $2 — that cap only applies to the supporting
+   cast around it, same as real starter-deck products (the box
+   costs more than $2 total specifically because of the one
+   valuable card inside).
    ============================================================ */
 (function(global){
-  const DECK_SIZE = 20;
+  const DECK_SIZE = 60;
   const MAX_COPIES = 4;
+  const PRICE_CAP_NZD = 2.00;
+  const TARGET_ENERGY = 17; // realistic energy count for a 60-card deck
 
   const STARTERS = {
     fire: {
       name:'Ember Striker', primaryType:'Fire', icon:'🔥', exCard:'Charizard ex',
-      query:'name:charizard OR name:charmander OR name:charmeleon',
+      stage1Name:'Charmeleon', basicName:'Charmander',
       blurb:'Aggressive fire power. Evolve into Charizard ex and overwhelm your opponent.'
     },
     water: {
       name:'Tide Warden', primaryType:'Water', icon:'💧', exCard:'Blastoise ex',
-      query:'name:blastoise OR name:squirtle OR name:wartortle',
+      stage1Name:'Wartortle', basicName:'Squirtle',
       blurb:'Tough and resilient. Blastoise ex soaks hits while you build your bench.'
     },
     grass: {
       name:'Bloom Engine', primaryType:'Grass', icon:'🌿', exCard:'Venusaur ex',
-      query:'name:venusaur OR name:bulbasaur OR name:ivysaur',
+      stage1Name:'Ivysaur', basicName:'Bulbasaur',
       blurb:'Steady and strategic. Grow stronger each turn with Venusaur ex leading the way.'
     }
   };
@@ -26,8 +39,18 @@
   function data(){ return Persistence.getUserData(Auth.currentUser.id); }
   function persist(d){ Persistence.saveUserData(Auth.currentUser.id, d); }
 
+  function isBasicEnergy(card){
+    return !!card && card.supertype === 'Energy' && ((card.subtypes||[]).includes('Basic') || /^basic-energy-/.test(card.id));
+  }
+  /** Regex, not exact equality — protects against a differently-encoded
+      "é" (from copy/paste hops) silently breaking supertype comparisons. */
+  function matchesSupertype(card, wanted){
+    if(/^pok.mon$/i.test(wanted)) return /^pok.mon$/i.test(card.supertype||'');
+    return card.supertype === wanted;
+  }
+
   const DeckBuilder = {
-    STARTERS, DECK_SIZE, MAX_COPIES,
+    STARTERS, DECK_SIZE, MAX_COPIES, PRICE_CAP_NZD,
 
     getDecks(){ return Object.values(data().decks).sort((a,b) => (b.modifiedAt||0)-(a.modifiedAt||0)); },
     getDeck(id){ return data().decks[id] || null; },
@@ -46,9 +69,16 @@
       d.decks[newId]={...src, id:newId, name:src.name+' (Copy)', createdAt:Date.now(), modifiedAt:Date.now(), cards:{...src.cards}, stats:{played:0,won:0,lost:0}};
       persist(d); return d.decks[newId];
     },
+
+    maxCopiesFor(cardId){
+      const card = Binder._getMeta(cardId);
+      return isBasicEnergy(card) ? DECK_SIZE : MAX_COPIES;
+    },
+
     setCardCount(deckId, cardId, qty){
       const d=data(); const deck=d.decks[deckId]; if(!deck) return;
-      qty=Math.max(0,Math.min(MAX_COPIES,qty));
+      const cap = DeckBuilder.maxCopiesFor(cardId);
+      qty=Math.max(0,Math.min(cap,qty));
       if(qty===0) delete deck.cards[cardId]; else deck.cards[cardId]=qty;
       deck.modifiedAt=Date.now(); persist(d);
     },
@@ -57,46 +87,119 @@
     validate(deck){
       const total=DeckBuilder.totalCount(deck); const errors=[];
       if(total !== DECK_SIZE) errors.push(`Needs exactly ${DECK_SIZE} cards (currently ${total}).`);
-      for(const qty of Object.values(deck.cards)) if(qty>MAX_COPIES){ errors.push(`Max ${MAX_COPIES} copies of any card.`); break; }
-      return { valid:errors.length===0, errors, total };
+      for(const [cardId,qty] of Object.entries(deck.cards)){
+        const cap = DeckBuilder.maxCopiesFor(cardId);
+        if(qty > cap){ errors.push(cap===MAX_COPIES ? `Max ${MAX_COPIES} copies of any card (Basic Energy is unlimited).` : ''); break; }
+      }
+      return { valid:errors.length===0 && errors.every(e=>!e), errors:errors.filter(Boolean), total };
     },
 
+    /**
+     * Builds a real 60-card starter deck:
+     *  - exactly 2 copies of the exact named ex card (real printing, real price)
+     *  - every other card capped at NZ$2.00 using live market data
+     *  - a realistic ~17-energy / ~15-trainer / ~28-Pokémon split
+     * Falls back to synthetic placeholder cards only if the live API
+     * is unreachable, so the deck can always be built offline too.
+     */
     async grantStarterDeck(kind){
       const cfg = STARTERS[kind];
       const d = data();
       const id = 'deck_starter_' + kind;
-      if(d.decks[id]) return d.decks[id]; // already have it
+      if(d.decks[id]) return d.decks[id]; // don't rebuild for returning players
       const deck = { id, name:cfg.name, createdAt:Date.now(), modifiedAt:Date.now(), cards:{}, favorite:true, notes:'', stats:{played:0,won:0,lost:0}, isStarter:true };
-      let pool = [];
-      try{ const res = await Api.searchCards({ query:cfg.query, pageSize:20 }); pool = res.cards; }catch(e){}
-      if(!pool.length){
-        pool = [
-          { id:`offline-${kind}-ex`, name:cfg.exCard, supertype:'Pokémon', subtypes:['Stage 2'], types:[cfg.primaryType], hp:'330', evolvesFrom:kind==='fire'?'Charmeleon':kind==='water'?'Wartortle':'Ivysaur', attacks:[{name:'Mega Blast',cost:[cfg.primaryType,cfg.primaryType],damage:'150',text:''}], weaknesses:[], resistances:[], retreatCost:['Colorless','Colorless'], set:{id:'starter',name:'Starter Set',series:'Starter'}, number:'1', rarity:'Double Rare', images:{} },
-          { id:`offline-${kind}-mid`, name:kind==='fire'?'Charmeleon':kind==='water'?'Wartortle':'Ivysaur', supertype:'Pokémon', subtypes:['Stage 1'], types:[cfg.primaryType], hp:'90', evolvesFrom:kind==='fire'?'Charmander':kind==='water'?'Squirtle':'Bulbasaur', attacks:[{name:'Slash',cost:[cfg.primaryType],damage:'40',text:''}], weaknesses:[], resistances:[], retreatCost:['Colorless'], set:{id:'starter',name:'Starter Set',series:'Starter'}, number:'2', rarity:'Uncommon', images:{} },
-          { id:`offline-${kind}-basic`, name:kind==='fire'?'Charmander':kind==='water'?'Squirtle':'Bulbasaur', supertype:'Pokémon', subtypes:['Basic'], types:[cfg.primaryType], hp:'70', evolvesFrom:null, attacks:[{name:'Scratch',cost:['Colorless'],damage:'20',text:''}], weaknesses:[], resistances:[], retreatCost:['Colorless'], set:{id:'starter',name:'Starter Set',series:'Starter'}, number:'3', rarity:'Common', images:{} }
-        ];
+
+      // 1. The headline ex — exact card, cheapest real printing, price shown as-is (not capped).
+      const exCard = await findCheapestExact(cfg.exCard, 'Pokémon');
+      addToDeck(deck, exCard, 2);
+
+      // 2. Supporting evolution line, capped at NZ$2.00 each.
+      const stage1 = await findCheapestExact(cfg.stage1Name, 'Pokémon', PRICE_CAP_NZD);
+      addToDeck(deck, stage1, 4);
+      const basic = await findCheapestExact(cfg.basicName, 'Pokémon', PRICE_CAP_NZD);
+      addToDeck(deck, basic, 6);
+
+      // 3. A couple of cheap filler attackers of the same type, for bench options.
+      const fillerPool = await Api.searchCards({ query:`supertype:Pokémon types:${cfg.primaryType}`, pageSize:30, orderBy:'-set.releaseDate' });
+      const fillers = (fillerPool.cards||[])
+        .filter(c => c.subtypes && c.subtypes.includes('Basic') && c.name!==cfg.basicName && Api.marketPrice(c) <= PRICE_CAP_NZD)
+        .slice(0,2);
+      fillers.forEach(c => addToDeck(deck, c, 3));
+
+      // 4. Cheap Trainer cards (Items/Supporters), capped, max 4 copies each.
+      const trainerPool = await Api.searchCards({ query:'supertype:Trainer', pageSize:30, orderBy:'-set.releaseDate' });
+      const trainers = (trainerPool.cards||[]).filter(c => Api.marketPrice(c) <= PRICE_CAP_NZD || Api.marketPriceUSD(c)===0).slice(0,4);
+      let trainerBudget = DECK_SIZE - TARGET_ENERGY - DeckBuilder.totalCount(deck);
+      for(const t of trainers){
+        if(trainerBudget <= 0) break;
+        const qty = Math.min(4, trainerBudget);
+        addToDeck(deck, t, qty);
+        trainerBudget -= qty;
       }
-      // Build deck: 1 ex, 2 stage 1, up to 4 basics, rest padding to exactly DECK_SIZE
-      const sorted = pool.slice(0,6);
-      sorted.forEach(c => { Binder._cacheMeta(c); Binder.addCard(c, 1); });
-      // distribute card slots
-      sorted.forEach((c,i) => { deck.cards[c.id] = i===0 ? 1 : i<=1 ? 2 : 3; });
-      // trim or pad to DECK_SIZE
+
+      // 5. Fill the rest with Basic Energy (unlimited copies, negligible real value).
+      const energyCard = syntheticBasicEnergy(cfg.primaryType);
+      Binder._cacheMeta(energyCard);
+      const remaining = Math.max(0, DECK_SIZE - DeckBuilder.totalCount(deck));
+      if(remaining > 0){ deck.cards[energyCard.id] = (deck.cards[energyCard.id]||0) + remaining; }
+
+      // Safety: if live data came back thin (offline), pad with more basic energy to hit exactly 60.
       let total = DeckBuilder.totalCount(deck);
-      const padCard = sorted[sorted.length-1];
-      while(total < DECK_SIZE && padCard){
-        const cur = deck.cards[padCard.id]||0;
-        if(cur >= MAX_COPIES) break;
-        deck.cards[padCard.id] = cur + 1; total++;
+      if(total < DECK_SIZE){ deck.cards[energyCard.id] = (deck.cards[energyCard.id]||0) + (DECK_SIZE - total); }
+      if(total > DECK_SIZE){
+        // trim energy first, then trainers, to land exactly on 60
+        let over = total - DECK_SIZE;
+        const trimOrder = [energyCard.id, ...trainers.map(t=>t.id)];
+        for(const cid of trimOrder){
+          if(over<=0) break;
+          const cur = deck.cards[cid]||0;
+          const cut = Math.min(cur, over);
+          deck.cards[cid] = cur - cut;
+          if(deck.cards[cid]===0) delete deck.cards[cid];
+          over -= cut;
+        }
       }
-      // trim if over
-      for(const id of Object.keys(deck.cards)){
-        if(DeckBuilder.totalCount(deck) <= DECK_SIZE) break;
-        if(deck.cards[id] > 1) deck.cards[id]--;
-      }
-      d.decks[id] = deck; persist(d); return deck;
+
+      d.decks[id] = deck; persist(d);
+      return deck;
     }
   };
+
+  /** Finds the exact-named card, optionally capped by NZD price, cheapest printing first. */
+  async function findCheapestExact(exactName, supertype, maxPrice){
+    try{
+      const res = await Api.searchCards({ query:`name:"${exactName}"`, pageSize:20, orderBy:'' });
+      let matches = (res.cards||[]).filter(c => c.name.toLowerCase() === exactName.toLowerCase() && (!supertype || matchesSupertype(c, supertype)));
+      if(maxPrice != null) matches = matches.filter(c => Api.marketPrice(c) <= maxPrice || Api.marketPriceUSD(c)===0);
+      matches.sort((a,b) => Api.marketPrice(a) - Api.marketPrice(b));
+      if(matches.length) return matches[0];
+    }catch(e){ /* fall through to offline card below */ }
+    return offlineCard(exactName);
+  }
+
+  function offlineCard(name){
+    return { id:'offline-'+name.toLowerCase().replace(/\s+/g,'-'), name, supertype:'Pokémon', subtypes:['Basic'], types:['Colorless'], hp:'60',
+      attacks:[{name:'Tackle',cost:['Colorless'],damage:'20',text:''}], weaknesses:[], resistances:[], retreatCost:['Colorless'],
+      set:{name:'Offline Cache'}, rarity:'Common', images:{}, tcgplayer:null };
+  }
+
+  function syntheticBasicEnergy(type){
+    // Basic Energy is intentionally not pulled from the live API: it's always
+    // available, always cheap (real-world value is negligible), and unlimited
+    // per the real rules, so synthesizing it keeps deck-building reliable offline.
+    return {
+      id: 'basic-energy-' + type.toLowerCase(), name: `Basic ${type} Energy`, supertype:'Energy', subtypes:['Basic'],
+      types:[type], hp:null, attacks:[], weaknesses:[], resistances:[], retreatCost:[],
+      set:{ name:'Energy' }, rarity:'Common', images:{}, tcgplayer:null
+    };
+  }
+
+  function addToDeck(deck, card, qty){
+    if(!card) return;
+    Binder._cacheMeta(card);
+    Binder.addCard(card, qty);
+    deck.cards[card.id] = (deck.cards[card.id]||0) + qty;
+  }
 
   /* ---------- Decks page ---------- */
   function renderDecks(container){
@@ -117,7 +220,7 @@
         const el = document.createElement('div'); el.className = 'deck-card';
         el.innerHTML = `
           <h3>${deck.favorite?'★ ':''}${UI.escapeHtml(deck.name)}</h3>
-          <div class="count">${DeckBuilder.totalCount(deck)}/${DECK_SIZE} · ${v.valid ? '<span class="text-success">Ready</span>' : '<span class="text-warning">Incomplete</span>'}</div>
+          <div class="count">${DeckBuilder.totalCount(deck)}/${DeckBuilder.DECK_SIZE} · ${v.valid ? '<span class="text-success">Ready</span>' : '<span class="text-warning">Incomplete</span>'}</div>
           <div class="thumbs">${thumbs.map(c=>`<img src="${UI.escapeHtml(UI.cardImg(c))}" onerror="this.style.opacity=0">`).join('')}</div>
           <div class="deck-stats">
             <span>${deck.stats.played} played</span>
@@ -176,9 +279,9 @@
           <div class="validation-msg ${v.valid?'ok':'bad'}">${v.valid ? '✓ Deck is ready to play.' : v.errors.join(' ')}</div>
           <div class="flex justify-between items-center mb-8">
             <h4 style="font-size:14px;">In Deck</h4>
-            <span class="text-mono text-dim" style="font-size:12px;">${v.total}/${DECK_SIZE}</span>
+            <span class="text-mono text-dim" style="font-size:12px;">${v.total}/${DeckBuilder.DECK_SIZE}</span>
           </div>
-          <div class="progress-bar mb-16"><div class="progress-bar-fill ${v.valid?'success':''}" style="width:${Math.min(100,Math.round((v.total/DECK_SIZE)*100))}%"></div></div>
+          <div class="progress-bar mb-16"><div class="progress-bar-fill ${v.valid?'success':''}" style="width:${Math.min(100,Math.round((v.total/DeckBuilder.DECK_SIZE)*100))}%"></div></div>
           <div id="de-deck-list" style="flex:1;overflow-y:auto;"></div>
           <div class="flex gap-8 mt-12">
             <button class="btn btn-primary btn-block" id="de-play" ${v.valid?'':'disabled'}>▶ Play This Deck</button>
@@ -209,7 +312,8 @@
     if(!filtered.length){ list.innerHTML='<p class="text-dim" style="font-size:13px;">No matching cards in your Binder.</p>'; return; }
     list.innerHTML = filtered.map(({card,entry})=>{
       const inDeck = deck.cards[card.id]||0;
-      const maxReached = inDeck >= Math.min(MAX_COPIES, entry.quantity);
+      const cap = Math.min(DeckBuilder.maxCopiesFor(card.id), entry.quantity);
+      const maxReached = inDeck >= cap;
       return `<div class="deck-row" data-card="${UI.escapeHtml(card.id)}">
         <img src="${UI.escapeHtml(UI.cardImg(card))}" onerror="this.style.opacity=0">
         <span class="n">${UI.escapeHtml(card.name)} <span class="text-faint">(own ${entry.quantity})</span></span>
