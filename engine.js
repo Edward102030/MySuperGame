@@ -11,7 +11,7 @@
   function cardStage(card){
     if(!card) return null;
     const sub=(card.subtypes||[]).find(s=>/^(basic|stage 1|stage 2)$/i.test(s));
-    return sub || card.stage || (card.supertype==='Pokémon'?'Basic':null);
+    return sub || card.stage || (/^pok.mon$/i.test(card.supertype||'')?'Basic':null);
   }
   function isEnergyLike(card){ return card && (card.supertype==='Energy' || /energy/i.test(card.name||'')); }
   function energyType(card){ return (card.types&&card.types[0]) || (card.name||'').replace(/\s*Energy/i,'') || 'Colorless'; }
@@ -391,7 +391,7 @@
     }
     if(selectedHandCard){
       const card=Binder._getMeta(selectedHandCard);
-      if(cardStage(card)==='Basic'&&card.supertype==='Pokémon'){
+      if(cardStage(card)==='Basic'&&/^pok.mon$/i.test(card.supertype||'')){
         addBtn(bar,`Play ${card.name} to ${!self.active?'Active':'Bench'}`,()=>{ Engine.playBasic(selectedHandCard,!self.active); selectedHandCard=null; });
       } else if(card.evolvesFrom){
         if(hint) hint.textContent=`Tap a ${card.evolvesFrom} in play to evolve into ${card.name}.`;
