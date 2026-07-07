@@ -6,11 +6,18 @@
      round-trip through localStorage, which never matched —
      so opened packs never actually left the inventory ("open
      next pack" appeared infinite). Fixed by comparing `.id`.
+   - getInv() now self-heals: any legacy pack saved before this
+     fix (missing an id) gets one patched in immediately, so old
+     data can never cause the removal-matching bug either.
    - Removed the cross-set "top up from any Pokémon" fallback
      that could dilute a named pack (e.g. "151") with cards from
      an unrelated set. A named pack now only ever pulls from its
      own set; the generic fallback pool is used only if the
      live API is fully unreachable.
+   - The pack-opening screen now shows the real official set logo
+     image (same one already used in the Shop grid, sourced
+     legitimately from the Pokémon TCG API) instead of a generic
+     glyph placeholder.
    Packs open as 11 cards (10 + Basic Energy, like real modern
    packs), with a guaranteed "hit" at slot 10. Odds below are
    community-estimated — The Pokémon Company has never published
@@ -107,7 +114,16 @@
   };
 
   function makePackId(){ return 'pack_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
-  function getInv(){ return Persistence.read('packs:'+(Auth.currentUser?.id||''), []); }
+  /** Reads inventory and immediately patches any legacy entries that predate
+      the id field (e.g. from before this fix was deployed), so removal by
+      id always works no matter how old the saved data is. */
+  function getInv(){
+    const inv = Persistence.read('packs:'+(Auth.currentUser?.id||''), []);
+    let patched = false;
+    inv.forEach(p => { if(!p.id){ p.id = makePackId(); patched = true; } });
+    if(patched) setInv(inv);
+    return inv;
+  }
   function setInv(inv){ Persistence.write('packs:'+Auth.currentUser.id, inv); }
 
   function byRarity(pool, re){ return pool.filter(c => re.test(c.rarity||'')); }
@@ -240,18 +256,22 @@
       container.appendChild(UI.emptyState({ glyph:'✦', title:'No packs to open', body:'Visit the Shop to buy booster packs.', actionLabel:'Go to Shop', onAction:()=>UI.navigate('shop') }));
       return;
     }
+    const firstPack = packs[0];
     container.innerHTML = `
       <div class="opening-stage">
         <div class="opening-pack-count">${packs.length} pack${packs.length>1?'s':''} to open · 11 cards each</div>
-        <div class="pack-hero" id="pack-hero">
-          <div class="pack-glyph">✦</div>
-          <div>${UI.escapeHtml(packs[0].name||'Booster Pack')}</div>
+        <div class="pack-hero" id="pack-hero" data-set="${UI.escapeHtml(firstPack.setId||'')}">
+          <div class="pack-glyph" id="pack-hero-art">✦</div>
+          <div>${UI.escapeHtml(firstPack.name||'Booster Pack')}</div>
           <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Tap to open</div>
         </div>
         <div class="reveal-row" id="reveal-row"></div>
         <button class="btn btn-ghost" id="opening-done" style="display:none;">← Back to Binder</button>
         <button class="btn btn-primary" id="open-next" style="display:none;">Open Next Pack</button>
       </div>`;
+
+    // Show the real official set logo (the same image the API provides in the Shop) if available.
+    loadPackArt(container, firstPack.setId);
 
     container.querySelector('#pack-hero').onclick = async () => {
       const hero = container.querySelector('#pack-hero');
@@ -282,6 +302,18 @@
       }
     };
     container.querySelector('#opening-done').onclick = () => UI.navigate('binder');
+  }
+
+  async function loadPackArt(container, setId){
+    if(!setId) return;
+    try{
+      const catalog = await Shop.getCatalog();
+      const product = catalog.find(p => p.setId === setId);
+      const artEl = container.querySelector('#pack-hero-art');
+      if(product && product.logo && artEl){
+        artEl.innerHTML = `<img src="${UI.escapeHtml(product.logo)}" alt="" style="max-width:110px;max-height:70px;object-fit:contain;" onerror="this.parentElement.textContent='✦'">`;
+      }
+    }catch(e){ /* keep the glyph fallback */ }
   }
 
   UI.registerPage('shop', renderShop);
