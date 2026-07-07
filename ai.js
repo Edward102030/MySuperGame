@@ -52,7 +52,7 @@
     // 2. Play basic Pokémon to fill the board.
     p.hand.forEach(cardId => {
       const card = Binder._getMeta(cardId);
-      if(!card || card.supertype !== 'Pokémon' || card.stage !== 'Basic') return;
+      if(!card || !/^pok.mon$/i.test(card.supertype||'') || !isBasic(card)) return;
       if(!p.active) candidates.push({ type:'playBasicActive', score: 85, cardId });
       else if(p.bench.length < 3) candidates.push({ type:'playBasicBench', score: 60, cardId });
     });
@@ -70,7 +70,8 @@
     p.hand.forEach(cardId => {
       const card = Binder._getMeta(cardId);
       if(!card) return;
-      if(card.supertype === 'Trainer' || (!card.supertype && !isEnergyLike(card) && card.supertype !== 'Pokémon')){
+      const isPokemon = /^pok.mon$/i.test(card.supertype||'');
+      if(card.supertype === 'Trainer' || (!card.supertype && !isEnergyLike(card) && !isPokemon)){
         candidates.push({ type:'trainer', score: 40, cardId });
       }
     });
@@ -87,6 +88,7 @@
   }
 
   function isEnergyLike(card){ return card.supertype === 'Energy' || /energy/i.test(card.name || ''); }
+  function isBasic(card){ return (card.subtypes||[]).some(s => /^basic$/i.test(s)) || card.stage === 'Basic'; }
 
   async function execute(Engine, action){
     switch(action.type){
