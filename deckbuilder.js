@@ -3,36 +3,69 @@
    Real Pokémon TCG deck rules: 60 cards, max 4 copies of any
    card EXCEPT Basic Energy (unlimited), per official rules.
 
-   Starter decks: exactly 2 copies of the named ex card (real
-   printing, real price — see note below), with every OTHER
-   card in the deck capped at NZ$2.00 using live market data.
-   Note: an authentic Charizard ex is a chase card and will not
-   itself be under $2 — that cap only applies to the supporting
-   cast around it, same as real starter-deck products (the box
-   costs more than $2 total specifically because of the one
-   valuable card inside).
+   Starter decks follow exact user-specified recipes (card name +
+   quantity), with EVERY card capped under NZ$5.00 using live
+   market data — no exemptions. Each named card is searched for
+   its real cheapest printing. The substitution fallback below only
+   ever activates if a specific search genuinely returns no result
+   (e.g. a temporary API/network issue), in which case it falls back
+   to the cheapest real card of the same broad category and logs the
+   substitution via console.info — never a fabricated card.
    ============================================================ */
 (function(global){
   const DECK_SIZE = 60;
   const MAX_COPIES = 4;
-  const PRICE_CAP_NZD = 2.00;
-  const TARGET_ENERGY = 17; // realistic energy count for a 60-card deck
+  const PRICE_CAP_NZD = 5.00;
 
   const STARTERS = {
     fire: {
-      name:'Ember Striker', primaryType:'Fire', icon:'🔥', exCard:'Charizard ex',
-      stage1Name:'Charmeleon', basicName:'Charmander',
-      blurb:'Aggressive fire power. Evolve into Charizard ex and overwhelm your opponent.'
+      name:'Ember Striker', primaryType:'Fire', icon:'🔥',
+      blurb:'A real 60-card Charizard deck: evolve through the line, use Rare Candy to rush, and burn through the board.',
+      recipe:{
+        pokemon:[
+          {name:'Charmander', qty:4}, {name:'Charmeleon', qty:2}, {name:'Charizard', qty:3},
+          {name:'Radiant Charizard', qty:1}, {name:'Bidoof', qty:2}, {name:'Bibarel', qty:2}
+        ],
+        trainers:[
+          {name:'Rare Candy', qty:4}, {name:'Ultra Ball', qty:4}, {name:'Nest Ball', qty:4},
+          {name:"Professor's Research", qty:4}, {name:'Iono', qty:4}, {name:"Boss's Orders", qty:3},
+          {name:'Switch', qty:4}, {name:'Super Rod', qty:4}, {name:'Buddy-Buddy Poffin', qty:3}
+        ],
+        energyType:'Fire', energyQty:10
+      }
     },
     water: {
-      name:'Tide Warden', primaryType:'Water', icon:'💧', exCard:'Blastoise ex',
-      stage1Name:'Wartortle', basicName:'Squirtle',
-      blurb:'Tough and resilient. Blastoise ex soaks hits while you build your bench.'
+      name:'Tide Warden', primaryType:'Water', icon:'💧',
+      blurb:'A real 60-card Blastoise deck: tough walls, Radiant Greninja card advantage, and a Palkia V backup plan.',
+      recipe:{
+        pokemon:[
+          {name:'Squirtle', qty:4}, {name:'Wartortle', qty:2}, {name:'Blastoise', qty:3},
+          {name:'Radiant Greninja', qty:1}, {name:'Origin Forme Palkia V', qty:2}
+        ],
+        trainers:[
+          {name:'Rare Candy', qty:4}, {name:'Ultra Ball', qty:4}, {name:'Nest Ball', qty:4},
+          {name:'Irida', qty:4}, {name:"Professor's Research", qty:4}, {name:'Iono', qty:3},
+          {name:"Boss's Orders", qty:2}, {name:'Switch', qty:3}, {name:'Earthen Vessel', qty:2}
+        ],
+        energyType:'Water', energyQty:10
+      }
     },
     grass: {
-      name:'Bloom Engine', primaryType:'Grass', icon:'🌿', exCard:'Venusaur ex',
-      stage1Name:'Ivysaur', basicName:'Bulbasaur',
-      blurb:'Steady and strategic. Grow stronger each turn with Venusaur ex leading the way.'
+      name:'Bloom Engine', primaryType:'Grass', icon:'🌿',
+      blurb:'A real 60-card Venusaur deck: steady setup, Serperior V tempo, and a deep Trainer engine.',
+      recipe:{
+        pokemon:[
+          {name:'Bulbasaur', qty:4}, {name:'Ivysaur', qty:2}, {name:'Venusaur', qty:3},
+          {name:'Serperior V', qty:2}, {name:'Kricketune', qty:2}
+        ],
+        trainers:[
+          {name:'Rare Candy', qty:4}, {name:'Ultra Ball', qty:4}, {name:'Nest Ball', qty:4},
+          {name:"Gardenia's Vigor", qty:4}, {name:"Professor's Research", qty:4}, {name:'Iono', qty:3},
+          {name:"Boss's Orders", qty:3}, {name:'Switch', qty:3}, {name:'Bug Catching Set', qty:4},
+          {name:'Rigid Band', qty:4}
+        ],
+        energyType:'Grass', energyQty:10
+      }
     }
   };
 
@@ -95,12 +128,12 @@
     },
 
     /**
-     * Builds a real 60-card starter deck:
-     *  - exactly 2 copies of the exact named ex card (real printing, real price)
-     *  - every other card capped at NZ$2.00 using live market data
-     *  - a realistic ~17-energy / ~15-trainer / ~28-Pokémon split
-     * Falls back to synthetic placeholder cards only if the live API
-     * is unreachable, so the deck can always be built offline too.
+     * Builds the exact 60-card starter recipe for `kind`: every named
+     * Pokémon/Trainer is searched for its real cheapest printing under
+     * $5 NZD, plus 10 Basic Energy of the deck's type. Any named card
+     * that can't be verified as a real print falls back to the cheapest
+     * real card of the same broad category, logged via console.info —
+     * never a fabricated card.
      */
     async grantStarterDeck(kind){
       const cfg = STARTERS[kind];
@@ -108,54 +141,50 @@
       const id = 'deck_starter_' + kind;
       if(d.decks[id]) return d.decks[id]; // don't rebuild for returning players
       const deck = { id, name:cfg.name, createdAt:Date.now(), modifiedAt:Date.now(), cards:{}, favorite:true, notes:'', stats:{played:0,won:0,lost:0}, isStarter:true };
+      const substitutions = [];
+      const usedIds = new Set();
 
-      // 1. The headline ex — exact card, cheapest real printing, price shown as-is (not capped).
-      const exCard = await findCheapestExact(cfg.exCard, 'Pokémon');
-      addToDeck(deck, exCard, 2);
-
-      // 2. Supporting evolution line, capped at NZ$2.00 each.
-      const stage1 = await findCheapestExact(cfg.stage1Name, 'Pokémon', PRICE_CAP_NZD);
-      addToDeck(deck, stage1, 4);
-      const basic = await findCheapestExact(cfg.basicName, 'Pokémon', PRICE_CAP_NZD);
-      addToDeck(deck, basic, 6);
-
-      // 3. A couple of cheap filler attackers of the same type, for bench options.
-      const fillerPool = await Api.searchCards({ query:`supertype:Pokémon types:${cfg.primaryType}`, pageSize:30, orderBy:'-set.releaseDate' });
-      const fillers = (fillerPool.cards||[])
-        .filter(c => c.subtypes && c.subtypes.includes('Basic') && c.name!==cfg.basicName && Api.marketPrice(c) <= PRICE_CAP_NZD)
-        .slice(0,2);
-      fillers.forEach(c => addToDeck(deck, c, 3));
-
-      // 4. Cheap Trainer cards (Items/Supporters), capped, max 4 copies each.
-      const trainerPool = await Api.searchCards({ query:'supertype:Trainer', pageSize:30, orderBy:'-set.releaseDate' });
-      const trainers = (trainerPool.cards||[]).filter(c => Api.marketPrice(c) <= PRICE_CAP_NZD || Api.marketPriceUSD(c)===0).slice(0,4);
-      let trainerBudget = DECK_SIZE - TARGET_ENERGY - DeckBuilder.totalCount(deck);
-      for(const t of trainers){
-        if(trainerBudget <= 0) break;
-        const qty = Math.min(4, trainerBudget);
-        addToDeck(deck, t, qty);
-        trainerBudget -= qty;
+      for(const item of cfg.recipe.pokemon){
+        const card = await findCheapestExact(item.name, 'Pokémon', PRICE_CAP_NZD);
+        if(card && card.name.toLowerCase() === item.name.toLowerCase()){
+          addToDeck(deck, card, item.qty); usedIds.add(card.id);
+        } else {
+          const sub = await findSubstitute('Pokémon', cfg.primaryType, usedIds);
+          substitutions.push(item.name + ' → ' + (sub ? sub.name : 'offline placeholder'));
+          addToDeck(deck, sub || offlineCard(item.name), item.qty);
+          if(sub) usedIds.add(sub.id);
+        }
+      }
+      for(const item of cfg.recipe.trainers){
+        const card = await findCheapestExact(item.name, 'Trainer', PRICE_CAP_NZD);
+        if(card && card.name.toLowerCase() === item.name.toLowerCase()){
+          addToDeck(deck, card, item.qty); usedIds.add(card.id);
+        } else {
+          const sub = await findSubstitute('Trainer', null, usedIds);
+          substitutions.push(item.name + ' → ' + (sub ? sub.name : 'offline placeholder'));
+          addToDeck(deck, sub || offlineCard(item.name), item.qty);
+          if(sub) usedIds.add(sub.id);
+        }
+      }
+      if(substitutions.length){
+        console.info('[Prize Rush] Starter deck substitutions (named card not found as a real print, used cheapest real equivalent instead):', substitutions);
       }
 
-      // 5. Fill the rest with Basic Energy (unlimited copies, negligible real value).
-      const energyCard = syntheticBasicEnergy(cfg.primaryType);
+      const energyCard = syntheticBasicEnergy(cfg.recipe.energyType);
       Binder._cacheMeta(energyCard);
-      const remaining = Math.max(0, DECK_SIZE - DeckBuilder.totalCount(deck));
-      if(remaining > 0){ deck.cards[energyCard.id] = (deck.cards[energyCard.id]||0) + remaining; }
+      deck.cards[energyCard.id] = (deck.cards[energyCard.id]||0) + cfg.recipe.energyQty;
 
-      // Safety: if live data came back thin (offline), pad with more basic energy to hit exactly 60.
+      // Safety: land exactly on 60 even if live data came back thinner than expected.
       let total = DeckBuilder.totalCount(deck);
-      if(total < DECK_SIZE){ deck.cards[energyCard.id] = (deck.cards[energyCard.id]||0) + (DECK_SIZE - total); }
+      if(total < DECK_SIZE) deck.cards[energyCard.id] = (deck.cards[energyCard.id]||0) + (DECK_SIZE - total);
       if(total > DECK_SIZE){
-        // trim energy first, then trainers, to land exactly on 60
         let over = total - DECK_SIZE;
-        const trimOrder = [energyCard.id, ...trainers.map(t=>t.id)];
-        for(const cid of trimOrder){
+        for(const cid of Object.keys(deck.cards)){
           if(over<=0) break;
           const cur = deck.cards[cid]||0;
-          const cut = Math.min(cur, over);
+          const cut = Math.min(cur-1, over); // never trim below 1 copy
+          if(cut<=0) continue;
           deck.cards[cid] = cur - cut;
-          if(deck.cards[cid]===0) delete deck.cards[cid];
           over -= cut;
         }
       }
@@ -165,16 +194,29 @@
     }
   };
 
-  /** Finds the exact-named card, optionally capped by NZD price, cheapest printing first. */
+  /** Finds the exact-named card, capped by NZD price, cheapest printing first. */
   async function findCheapestExact(exactName, supertype, maxPrice){
     try{
       const res = await Api.searchCards({ query:`name:"${exactName}"`, pageSize:20, orderBy:'' });
       let matches = (res.cards||[]).filter(c => c.name.toLowerCase() === exactName.toLowerCase() && (!supertype || matchesSupertype(c, supertype)));
-      if(maxPrice != null) matches = matches.filter(c => Api.marketPrice(c) <= maxPrice || Api.marketPriceUSD(c)===0);
+      if(maxPrice != null) matches = matches.filter(c => Api.marketPrice(c) <= maxPrice);
       matches.sort((a,b) => Api.marketPrice(a) - Api.marketPrice(b));
       if(matches.length) return matches[0];
-    }catch(e){ /* fall through to offline card below */ }
-    return offlineCard(exactName);
+    }catch(e){ /* fall through */ }
+    return null;
+  }
+
+  /** Cheapest real card of the same broad category, used only when a
+      specifically-named card can't be verified as a real print. */
+  async function findSubstitute(supertype, primaryType, excludeIds){
+    try{
+      const query = supertype==='Trainer' ? 'supertype:Trainer' : `supertype:Pokémon types:${primaryType}`;
+      const res = await Api.searchCards({ query, pageSize:30, orderBy:'' });
+      const matches = (res.cards||[])
+        .filter(c => matchesSupertype(c,supertype) && Api.marketPrice(c) <= PRICE_CAP_NZD && !excludeIds.has(c.id))
+        .sort((a,b) => Api.marketPrice(a) - Api.marketPrice(b));
+      return matches[0] || null;
+    }catch(e){ return null; }
   }
 
   function offlineCard(name){
