@@ -16,6 +16,26 @@
   function isEnergyLike(card){ return card && (card.supertype==='Energy' || /energy/i.test(card.name||'')); }
   function energyType(card){ return (card.types&&card.types[0]) || (card.name||'').replace(/\s*Energy/i,'') || 'Colorless'; }
   function findSlot(p, u){ if(p.active&&p.active.uid===u) return p.active; return p.bench.find(s=>s.uid===u)||null; }
+  function flipCoin(){ return Math.random() < 0.5 ? 'heads' : 'tails'; }
+
+  /** Generic special-condition detector for real attack/ability text. Covers
+      the common phrasing patterns across many real cards — NOT a full parser
+      for every card's unique wording (that would need a licensed effects
+      database), but a faithful implementation of the generic mechanic itself
+      once a condition is identified. */
+  function detectStatusFromText(text){
+    if(!text) return null;
+    const t = text.toLowerCase();
+    const needsCoinFlip = /flip a coin/.test(t);
+    let condition = null;
+    if(/asleep/.test(t)) condition = 'Asleep';
+    else if(/paralyzed/.test(t)) condition = 'Paralyzed';
+    else if(/confused/.test(t)) condition = 'Confused';
+    else if(/poisoned/.test(t)) condition = 'Poisoned';
+    else if(/burned/.test(t)) condition = 'Burned';
+    if(!condition) return null;
+    return { condition, needsCoinFlip };
+  }
 
   /* ---------- Rules Engine ---------- */
   const Rules = {
@@ -75,4 +95,502 @@
       const deck=DeckBuilder.getDeck(deckId);
       if(!deck){ UI.toast('Deck not found','error'); return; }
       const v=DeckBuilder.validate(deck);
-      if(!v.valid){ UI.toast('Deck is not ready: '+v.errors[0],'warning');
+      if(!v.valid){ UI.toast('Deck is not ready: '+v.errors[0],'warning'); return; }
+      const aiDeck=opts.opponentDeck||pickAiDeck(deck);
+      match=buildState(deck, aiDeck, opts);
+      Events.emit('MatchStarted',{deckId});
+      UI.navigate('match',{title:'Match'});
+      log(`Turn 1 — ${match.players.self.name} goes first.`);
+      render();
+      Persistence.saveMatchSnapshot(Auth.currentUser.id, match);
+    },
+
+    resume(snapshot){ match=snapshot; UI.navigate('match',{title:'Match (resumed)'}); render(); if(match.players[match.activeSide].isAI&&!match.winner) setTimeout(()=>AI.takeTurn(Engine),600); },
+
+    async playBasic(cardId, toActive){
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        const idx=p.hand.indexOf(cardId); if(idx===-1) return;
+        const card=Binder._getMeta(cardId);
+        if(cardStage(card)!=='Basic') return;
+        const slot={uid:uid(),cardId,damage:0,energy:[],statusConditions:[],tools:[],turnPlayed:match.turn};
+        if(toActive&&!p.active) p.active=slot;
+        else if(p.bench.length<BENCH_MAX) p.bench.push(slot);
+        else{ UI.toast('Bench is full','warning',1800); return; }
+        p.hand.splice(idx,1);
+        log(`${p.name} played ${card.name}.`);
+      });
+    },
+
+    async evolve(handCardId, targetSlotUid){
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        const card=Binder._getMeta(handCardId);
+        const slot=findSlot(p,targetSlotUid);
+        if(!slot||!Rules.canEvolve(slot,card,match)){ UI.toast('Cannot evolve that Pokémon right now.','warning',2000); return; }
+        const idx=p.hand.indexOf(handCardId); if(idx===-1) return;
+        p.discard.push(slot.cardId);
+        p.hand.splice(idx,1);
+        slot.cardId=handCardId; slot.turnPlayed=match.turn;
+        log(`${p.name} evolved to ${card.name}!`);
+      });
+    },
+
+    async attachEnergy(cardId, targetSlotUid){
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        if(!Rules.canAttachEnergy(match,match.activeSide)){ UI.toast('Already attached energy this turn.','warning',2000); return; }
+        const idx=p.hand.indexOf(cardId); if(idx===-1) return;
+        const card=Binder._getMeta(cardId);
+        if(!isEnergyLike(card)) return;
+        const slot=findSlot(p,targetSlotUid)||p.active;
+        if(!slot) return;
+        p.hand.splice(idx,1);
+        slot.energy.push(energyType(card));
+        p.energyAttachedThisTurn=true;
+        log(`${p.name} attached ${energyType(card)} Energy.`);
+      });
+    },
+
+    async retreat(toBenchUid){
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        if(!p.active){ UI.toast('No active Pokémon to retreat.','warning',1800); return; }
+        if(!Rules.canRetreat(p.active)){ UI.toast('Cannot retreat — not enough energy or a status condition prevents it.','warning',2200); return; }
+        const bench=findSlot(p,toBenchUid);
+        if(!bench) return;
+        const meta=Binder._getMeta(p.active.cardId);
+        const cost=(meta&&meta.retreatCost||[]).length;
+        p.active.energy.splice(0,cost);
+        p.bench=p.bench.filter(s=>s.uid!==toBenchUid);
+        p.bench.push(p.active);
+        p.active=bench;
+        log(`${p.name} retreated.`);
+      });
+    },
+
+    async playTrainer(cardId, targetSlotUid){
+      await action(()=>{
+        const p=match.players[match.activeSide];
+        const idx=p.hand.indexOf(cardId); if(idx===-1) return;
+        const card=Binder._getMeta(cardId);
+        const subtypes=(card.subtypes||[]).join(' ').toLowerCase();
+
+        if(/stadium/.test(subtypes)){
+          if(match.stadium) log(`${Binder._getMeta(match.stadium)?.name||'The old Stadium'} was discarded.`);
+          match.stadium = cardId;
+          p.hand.splice(idx,1);
+          log(`${p.name} played the Stadium ${card.name}.`);
+          return;
+        }
+        if(/supporter/.test(subtypes)){
+          if(match.turnFlags.supporterPlayed){ UI.toast('Only one Supporter card per turn.','warning',2200); return; }
+          match.turnFlags.supporterPlayed = true;
+          p.hand.splice(idx,1); p.discard.push(cardId);
+          drawCards(p,1);
+          log(`${p.name} played Supporter ${card.name} — drew a card.`);
+          return;
+        }
+        if(/pok.mon tool/i.test(card.subtypes&&card.subtypes.join(' ')||'') || /tool/.test(subtypes)){
+          const target=findSlot(p,targetSlotUid)||p.active;
+          if(!target){ UI.toast('No Pokémon in play to attach a Tool to.','warning',2000); return; }
+          if(target.tools.length>=1){ UI.toast('That Pokémon already has a Tool attached (max 1).','warning',2200); return; }
+          p.hand.splice(idx,1);
+          target.tools.push(cardId);
+          log(`${p.name} attached the Tool ${card.name}.`);
+          return;
+        }
+        // Plain Item card — unique per-card effects aren't individually modeled
+        // (that would need a full card-effects database), so Items resolve as
+        // a generic card-advantage effect rather than pretending to search/
+        // shuffle/etc. exactly per their real text.
+        p.hand.splice(idx,1); p.discard.push(cardId);
+        drawCards(p,1);
+        log(`${p.name} played ${card.name} — drew a card.`);
+      });
+    },
+
+    async attack(attackIndex){
+      await action(async()=>{
+        const side=match.activeSide, other=side==='self'?'opp':'self';
+        const p=match.players[side], o=match.players[other];
+        if(!p.active||!o.active) return;
+        if(p.active.statusConditions.includes('Asleep')){ UI.toast(`${p.name}'s Pokémon is Asleep and can't attack.`,'warning',2200); return; }
+        if(p.active.statusConditions.includes('Paralyzed')){ UI.toast(`${p.name}'s Pokémon is Paralyzed and can't attack.`,'warning',2200); return; }
+        const card=Binder._getMeta(p.active.cardId);
+        const atk=(card.attacks||[])[attackIndex];
+        if(!atk||!Rules.attackCostMet(p.active,atk)){ UI.toast('Not enough energy for that attack.','warning',2000); return; }
+
+        if(p.active.statusConditions.includes('Confused')){
+          const flip=flipCoin();
+          log(`${card.name} is Confused — coin flip: ${flip}.`);
+          if(flip==='tails'){
+            p.active.damage+=30;
+            log(`${card.name} hurt itself in confusion for 30 damage! The attack failed.`);
+            match.turnFlags.attacked=true;
+            if(Rules.isKO(p.active,card)){
+              log(`${card.name} was knocked out by confusion damage!`);
+              await Animations.knockOut(document.getElementById('self-active'));
+              p.discard.push(p.active.cardId);
+              p.active=p.bench.shift()||null;
+            }
+            return;
+          }
+        }
+
+        const defCard=Binder._getMeta(o.active.cardId);
+        const dmg=Rules.computeDamage(atk,card,defCard);
+        o.active.damage+=dmg;
+        log(`${card.name} used ${atk.name}${dmg?' for '+dmg+' damage':''}.`);
+        await Animations.shake(document.getElementById('opp-active'));
+        render();
+
+        // Generic special-condition application — detects common real-card
+        // phrasing (e.g. "flip a coin, if heads the Defending Pokémon is now
+        // Asleep") rather than modeling every card's exact unique text.
+        const statusHit=detectStatusFromText(atk.text);
+        if(statusHit && !Rules.isKO(o.active,defCard)){
+          const applies = !statusHit.needsCoinFlip || flipCoin()==='heads';
+          if(statusHit.needsCoinFlip) log(`Coin flip for ${statusHit.condition}: ${applies?'heads':'tails'}.`);
+          if(applies){
+            o.active.statusConditions = o.active.statusConditions.filter(c => !['Asleep','Paralyzed','Confused'].includes(c));
+            o.active.statusConditions.push(statusHit.condition);
+            if(statusHit.condition==='Paralyzed') o.active.paralyzedUntilTurn = match.turn + 2;
+            log(`${defCard.name} is now ${statusHit.condition}!`);
+          }
+        }
+
+        if(Rules.isKO(o.active,defCard)){
+          log(`${defCard.name} was knocked out!`);
+          await Animations.knockOut(document.getElementById('opp-active'));
+          o.discard.push(o.active.cardId);
+          o.active=o.bench.shift()||null;
+          const prizes=Rules.prizesForKO(defCard);
+          for(let i=0;i<prizes&&p.prizesRemaining>0;i++){
+            p.prizesRemaining--;
+            const dot=document.querySelector('.prize-pip:not(.taken)');
+            if(dot) await Animations.pulse(dot,'fx-prize',400);
+          }
+          log(`${p.name} took ${prizes} prize card${prizes>1?'s':''}! (${p.prizesRemaining} remaining)`);
+          if(o.active) log(`${o.active ? Binder._getMeta(o.active.cardId)?.name||'?' : '?'} is now the active Pokémon.`);
+        }
+        match.turnFlags.attacked=true;
+      });
+      await checkEnd();
+    },
+
+    async endTurn(){
+      if(match.winner) return;
+      await action(()=>{ match.turnFlags={attacked:false}; });
+      if(await checkEnd()) return;
+      await action(async()=>{ await runPokemonCheckup(); });
+      if(await checkEnd()) return;
+      switchTurn();
+    },
+
+    async concede(){
+      match.winner=match.activeSide==='self'?'opp':'self';
+      log(`${match.players[match.activeSide==='self'?'self':'opp'].name} conceded.`);
+      await finishMatch();
+    }
+  };
+
+  /** Pokémon Checkup: runs between every turn, for BOTH active Pokémon,
+      per official rules — resolves Poison/Burn damage, the Asleep wake-up
+      coin flip, and clears expired Paralysis. */
+  async function runPokemonCheckup(){
+    for(const side of ['self','opp']){
+      const p = match.players[side];
+      const slot = p.active;
+      if(!slot || !slot.statusConditions.length) continue;
+      const card = Binder._getMeta(slot.cardId);
+      if(!card) continue;
+
+      if(slot.statusConditions.includes('Poisoned')){
+        slot.damage += 10;
+        log(`${card.name} took 10 Poison damage.`);
+      }
+      if(slot.statusConditions.includes('Burned')){
+        const flip = flipCoin();
+        log(`${card.name} is Burned — coin flip: ${flip}.`);
+        if(flip==='tails'){ slot.damage += 20; log(`${card.name} took 20 Burn damage.`); }
+        else log(`${card.name} shook off the Burn damage this time.`);
+      }
+      if(slot.statusConditions.includes('Asleep')){
+        const flip = flipCoin();
+        log(`${card.name} is Asleep — coin flip: ${flip}.`);
+        if(flip==='heads'){
+          slot.statusConditions = slot.statusConditions.filter(c=>c!=='Asleep');
+          log(`${card.name} woke up!`);
+        }
+      }
+      if(slot.statusConditions.includes('Paralyzed') && slot.paralyzedUntilTurn && match.turn >= slot.paralyzedUntilTurn){
+        slot.statusConditions = slot.statusConditions.filter(c=>c!=='Paralyzed');
+        delete slot.paralyzedUntilTurn;
+        log(`${card.name} is no longer Paralyzed.`);
+      }
+
+      if(Rules.isKO(slot, card)){
+        log(`${card.name} was knocked out by a status condition!`);
+        p.discard.push(slot.cardId);
+        p.active = p.bench.shift() || null;
+        const other = match.players[side==='self'?'opp':'self'];
+        const prizes = Rules.prizesForKO(card);
+        for(let i=0;i<prizes && other.prizesRemaining>0;i++) other.prizesRemaining--;
+        log(`${other.name} took ${prizes} prize card${prizes>1?'s':''} from the status knockout.`);
+      }
+    }
+  }
+
+  function log(msg){ match.log.push(msg); Events.emit('MatchLogged',msg); }
+  function drawCards(p,n){ for(let i=0;i<n;i++){ if(!p.deck.length){ p.mustDrawNext=true; return; } p.hand.push(p.deck.shift()); } }
+
+  async function action(fn){
+    const r=fn(); if(r instanceof Promise) await r;
+    render();
+    Persistence.saveMatchSnapshot(Auth.currentUser.id,match);
+  }
+
+  async function checkEnd(){
+    const w=Rules.checkWinner(match);
+    if(w){ match.winner=w; render(); await finishMatch(); return true; }
+    return false;
+  }
+
+  function switchTurn(){
+    match.activeSide=match.activeSide==='self'?'opp':'self';
+    match.turn++;
+    const p=match.players[match.activeSide];
+    p.energyAttachedThisTurn=false; p.mustDrawNext=false;
+    drawCards(p,1);
+    log(`Turn ${match.turn} — ${p.name}'s turn.`);
+    render();
+    Persistence.saveMatchSnapshot(Auth.currentUser.id,match);
+    if(p.isAI&&!match.winner) setTimeout(()=>AI.takeTurn(Engine),600);
+  }
+
+  async function finishMatch(){
+    Persistence.clearMatchSnapshot(Auth.currentUser.id);
+    const won=match.winner==='self';
+    const d=Persistence.getUserData(Auth.currentUser.id);
+    d.statistics.matchesPlayed=(d.statistics.matchesPlayed||0)+1;
+    if(won) d.statistics.matchesWon=(d.statistics.matchesWon||0)+1;
+    else d.statistics.matchesLost=(d.statistics.matchesLost||0)+1;
+    const deck=d.decks[match.deckId];
+    if(deck){ deck.stats.played++; if(won) deck.stats.won++; else deck.stats.lost++; }
+    Persistence.saveUserData(Auth.currentUser.id,d);
+    Events.emit('MatchFinished',{won,tournamentId:match.tournamentId});
+    const title=won?'🏆 Victory!':'Defeat';
+    const body=won?`You claimed all your prize cards. ${match.tournamentId?'Advancing in the tournament…':'Well played!'}`:`${match.players.opp.name} won this time. ${match.tournamentId?'You\'ve been eliminated.':'Try again!'}`;
+    if(won){
+      Economy.grant(20,'Match Reward', match.tournamentId ? 'tournament-round' : 'quick-match', match.tournamentId ? 'Round win bonus' : 'Match win bonus');
+      UI.toast('You won! +NZ$20.00 bonus','success');
+    }
+    render();
+    await UI.dialog({ title, body, actions:[{label:match.tournamentId?'Continue Tournament':'Back to Home',variant:'primary',value:true}] });
+    if(match.tournamentId) global.Tournament&&Tournament.reportMatchResult(match.tournamentId,match.matchId,won);
+    else UI.navigate('home');
+  }
+
+  function buildState(deck, aiDeck, opts){
+    const selfList=expand(deck), oppList=expand(aiDeck);
+    return {
+      turn:1, activeSide:'self', winner:null, log:[], turnFlags:{attacked:false},
+      deckId:deck.id, tournamentId:opts.tournamentId||null, matchId:opts.matchId||null,
+      players:{
+        self:makePlayer(Auth.currentUser.nickname||'You',selfList,false),
+        opp:makePlayer(opts.opponentName||'AI Trainer',oppList,true)
+      }
+    };
+  }
+  function makePlayer(name,list,isAI){
+    let shuffled, hand, deck;
+    let attempts = 0;
+    // Real-rule mulligan: a starting hand with no Basic Pokémon must be reshuffled and redrawn.
+    do{
+      shuffled = shuffle([...list]);
+      hand = shuffled.slice(0, HAND_START);
+      deck = shuffled.slice(HAND_START);
+      attempts++;
+    } while(attempts < 8 && !hand.some(id => { const c = Binder._getMeta(id); return c && cardStage(c) === 'Basic'; }));
+    return { name, isAI, deck, hand, discard:[], active:null, bench:[], prizesRemaining:PRIZES, energyAttachedThisTurn:false, mustDrawNext:false };
+  }
+  function expand(deck){ const l=[]; Object.entries(deck.cards).forEach(([id,q])=>{ for(let i=0;i<q;i++) l.push(id); }); return l; }
+  function pickAiDeck(playerDeck){ return DeckBuilder.getDecks().find(d=>d.isStarter&&d.id!==playerDeck.id)||DeckBuilder.getDecks()[0]||playerDeck; }
+  function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+  /* ---------- Match page rendering ---------- */
+  let selectedHandCard=null;
+
+  function render(){
+    const container=document.getElementById('page-match');
+    if(!container||!container.classList.contains('active')) return;
+    if(!match){ container.innerHTML=''; container.appendChild(UI.emptyState({title:'No active match',body:'Start one from Play.',actionLabel:'Go to Play',onAction:()=>UI.navigate('play')})); return; }
+    const self=match.players.self, opp=match.players.opp;
+    const myTurn=match.activeSide==='self'&&!match.winner;
+
+    container.innerHTML=`
+      <div class="match-board">
+        <div class="match-hud">
+          <span class="turn-indicator">Turn ${match.turn}</span>
+          <span style="font-size:11px;color:var(--text-dim);">${match.players[match.activeSide].name}'s turn</span>
+          <div class="prize-pips" title="Your prizes remaining">
+            ${Array.from({length:PRIZES},(_,i)=>`<span class="prize-pip ${i<(PRIZES-self.prizesRemaining)?'taken':''}"></span>`).join('')}
+          </div>
+        </div>
+
+        <div style="text-align:center;font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);padding:2px 0;">
+          ${UI.escapeHtml(opp.name)} — Deck ${opp.deck.length} · Hand ${opp.hand.length} · Prizes ${opp.prizesRemaining}
+        </div>
+
+        ${match.stadium ? renderStadiumBar() : ''}
+
+        <div class="field-zones">
+          <div class="side-zones">
+            <div class="side-label">Opponent Bench</div>
+            <div class="bench-row" id="opp-bench"></div>
+          </div>
+          <div class="active-zone">
+            <div class="slot active-slot" id="opp-active"></div>
+            <div class="vs-divider">VS</div>
+            <div class="slot active-slot" id="self-active"></div>
+          </div>
+          <div class="side-zones">
+            <div class="side-label">Your Bench</div>
+            <div class="bench-row" id="self-bench"></div>
+          </div>
+        </div>
+
+        <div class="hand-row" id="self-hand"></div>
+
+        <div class="match-actions" id="match-actions"></div>
+        ${selectedHandCard ? `<div class="match-hint" id="match-hint"></div>` : ''}
+        <div class="match-log" id="match-log">${match.log.slice(-5).map(m=>`<div>${UI.escapeHtml(m)}</div>`).join('')}</div>
+
+        ${match.winner ? `<div class="alert-banner ${match.winner==='self'?'success':'error'}" style="text-align:center;font-size:15px;font-weight:700;">${match.winner==='self'?'🏆 You win!':'💀 Opponent wins'}</div>` : ''}
+      </div>`;
+
+    renderSlot('opp-active', opp.active, false);
+    renderSlot('self-active', self.active, true);
+    renderBench('opp-bench', opp.bench, false);
+    renderBench('self-bench', self.bench, true);
+    renderHand(self, myTurn);
+    renderActions(self, myTurn);
+    const log=container.querySelector('#match-log');
+    if(log) log.scrollTop=log.scrollHeight;
+  }
+
+  function renderStadiumBar(){
+    const card = Binder._getMeta(match.stadium);
+    if(!card) return '';
+    return `<div class="stadium-bar"><span class="stadium-ic">⛩</span> Stadium in play: <b>${UI.escapeHtml(card.name)}</b></div>`;
+  }
+
+  function renderSlot(id, slot, mine){
+    const el=document.getElementById(id); if(!el) return;
+    if(!slot){ el.className='slot active-slot'+(mine?' empty-hint':''); el.innerHTML=''; return; }
+    const card=Binder._getMeta(slot.cardId);
+    el.className='slot active-slot filled'+(mine&&selectedHandCard?' selectable':'');
+    el.innerHTML=`<img src="${UI.escapeHtml(UI.cardImg(card))}" alt="${UI.escapeHtml(card?card.name:'')}" onerror="this.style.opacity=0.1">
+      ${slot.damage?`<span class="dmg-counter">${slot.damage}dmg</span>`:''}
+      ${slot.energy.length?`<div class="energy-pips">${slot.energy.map(e=>`<span class="energy-pip" style="background:var(--t-${e.toLowerCase()},var(--t-colorless));" title="${e}"></span>`).join('')}</div>`:''}
+      ${statusBadges(slot)}
+      ${slot.tools.length?`<span class="tool-badge" title="Tool attached">🔧</span>`:''}`;
+    if(mine) el.onclick=()=>onActiveClick(slot,mine);
+  }
+
+  const STATUS_ICONS = { Asleep:'😴', Paralyzed:'⚡', Confused:'❓', Poisoned:'☠', Burned:'🔥' };
+  function statusBadges(slot){
+    if(!slot.statusConditions || !slot.statusConditions.length) return '';
+    return `<div class="status-badges">${slot.statusConditions.map(c=>`<span class="status-badge" title="${c}">${STATUS_ICONS[c]||'?'}</span>`).join('')}</div>`;
+  }
+
+  function renderBench(id, bench, mine){
+    const el=document.getElementById(id); if(!el) return; el.innerHTML='';
+    for(let i=0;i<BENCH_MAX;i++){
+      const slot=bench[i]; const s=document.createElement('div');
+      s.className='slot'+(slot?' filled':'')+(mine&&selectedHandCard&&slot?' selectable':'');
+      if(slot){
+        const card=Binder._getMeta(slot.cardId);
+        s.innerHTML=`<img src="${UI.escapeHtml(UI.cardImg(card))}" onerror="this.style.opacity=0.1">
+          ${slot.damage?`<span class="dmg-counter">${slot.damage}dmg</span>`:''}
+          ${slot.energy.length?`<div class="energy-pips">${slot.energy.map(e=>`<span class="energy-pip" style="background:var(--t-${e.toLowerCase()},var(--t-colorless));"></span>`).join('')}</div>`:''}
+          ${statusBadges(slot)}
+          ${slot.tools.length?`<span class="tool-badge" title="Tool attached">🔧</span>`:''}`;
+        if(mine) s.onclick=()=>onBenchClick(slot);
+      }
+      el.appendChild(s);
+    }
+  }
+
+  function renderHand(self, myTurn){
+    const row=document.getElementById('self-hand'); if(!row) return; row.innerHTML='';
+    self.hand.forEach(cardId=>{
+      const card=Binder._getMeta(cardId); if(!card) return;
+      const el=document.createElement('div');
+      el.className='hand-card'+(selectedHandCard===cardId?' selected':'');
+      el.innerHTML=`<img src="${UI.escapeHtml(UI.cardImg(card))}" alt="${UI.escapeHtml(card.name)}" onerror="this.style.opacity=0.1" title="${UI.escapeHtml(card.name)}">`;
+      el.onclick=()=>{ if(!myTurn) return; selectedHandCard=selectedHandCard===cardId?null:cardId; render(); };
+      row.appendChild(el);
+    });
+  }
+
+  function renderActions(self, myTurn){
+    const bar=document.getElementById('match-actions'); if(!bar) return; bar.innerHTML='';
+    const hint=document.getElementById('match-hint');
+    if(!myTurn){
+      bar.innerHTML=`<span class="text-dim" style="font-size:12.5px;">Waiting for ${UI.escapeHtml(match.players.opp.name)}…</span>`;
+      return;
+    }
+    if(selectedHandCard){
+      const card=Binder._getMeta(selectedHandCard);
+      if(cardStage(card)==='Basic'&&/^pok.mon$/i.test(card.supertype||'')){
+        addBtn(bar,`Play ${card.name} to ${!self.active?'Active':'Bench'}`,()=>{ Engine.playBasic(selectedHandCard,!self.active); selectedHandCard=null; });
+      } else if(card.evolvesFrom){
+        if(hint) hint.textContent=`Tap a ${card.evolvesFrom} in play to evolve into ${card.name}.`;
+      } else if(isEnergyLike(card)){
+        if(hint) hint.textContent=`Tap a Pokémon in play to attach ${energyType(card)} Energy.`;
+      } else {
+        addBtn(bar,`Play ${card.name}`,()=>{ Engine.playTrainer(selectedHandCard); selectedHandCard=null; });
+      }
+      addBtn(bar,'Cancel',()=>{ selectedHandCard=null; render(); },'btn-ghost');
+    } else {
+      if(self.active&&!match.turnFlags.attacked){
+        const card=Binder._getMeta(self.active.cardId);
+        (card.attacks||[]).forEach((atk,i)=>{
+          const usable=Rules.attackCostMet(self.active,atk);
+          addBtn(bar,`${atk.name} (${atk.damage||0})`,()=>Engine.attack(i),!usable,'btn-primary');
+        });
+      }
+      addBtn(bar,'End Turn',()=>Engine.endTurn(),'',true);
+      addBtn(bar,'Concede',()=>UI.confirmDialog('Concede?','This counts as a loss.','Concede',true).then(ok=>ok&&Engine.concede()),'btn-ghost');
+    }
+  }
+
+  function addBtn(bar, label, onClick, disabled, variant){
+    const b=document.createElement('button');
+    b.className='btn '+(typeof disabled==='string'?disabled:variant||'btn-secondary')+' btn-sm';
+    b.textContent=label;
+    b.disabled=disabled===true;
+    b.onclick=onClick;
+    bar.appendChild(b);
+  }
+
+  function onActiveClick(slot, mine){
+    if(!mine||!selectedHandCard) return;
+    const card=Binder._getMeta(selectedHandCard);
+    if(card.evolvesFrom) Engine.evolve(selectedHandCard,slot.uid);
+    else if(isEnergyLike(card)) Engine.attachEnergy(selectedHandCard,slot.uid);
+    selectedHandCard=null;
+  }
+  function onBenchClick(slot){
+    if(!selectedHandCard){ Engine.retreat(slot.uid); return; }
+    const card=Binder._getMeta(selectedHandCard);
+    if(card.evolvesFrom) Engine.evolve(selectedHandCard,slot.uid);
+    else if(isEnergyLike(card)) Engine.attachEnergy(selectedHandCard,slot.uid);
+    selectedHandCard=null;
+  }
+
+  UI.registerPage('match', container=>{ render(); });
+  global.Engine=Engine;
+})(window);
