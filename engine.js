@@ -406,13 +406,14 @@
   function makePlayer(name,list,isAI){
     let shuffled, hand, deck;
     let attempts = 0;
-    // Real-rule mulligan: a starting hand with no Basic Pokémon must be reshuffled and redrawn.
+    // User-requested rule: at least 2 Basic Pokémon in the opening hand
+    // (stricter than the official minimum of 1) — reshuffle until met.
     do{
       shuffled = shuffle([...list]);
       hand = shuffled.slice(0, HAND_START);
       deck = shuffled.slice(HAND_START);
       attempts++;
-    } while(attempts < 8 && !hand.some(id => { const c = Binder._getMeta(id); return c && cardStage(c) === 'Basic'; }));
+    } while(attempts < 12 && hand.filter(id => { const c = Binder._getMeta(id); return c && cardStage(c) === 'Basic'; }).length < 2);
     return { name, isAI, deck, hand, discard:[], active:null, bench:[], prizesRemaining:PRIZES, energyAttachedThisTurn:false, mustDrawNext:false };
   }
   function expand(deck){ const l=[]; Object.entries(deck.cards).forEach(([id,q])=>{ for(let i=0;i<q;i++) l.push(id); }); return l; }
@@ -434,56 +435,121 @@
         <div class="match-hud">
           <span class="turn-indicator">Turn ${match.turn}</span>
           <span style="font-size:11px;color:var(--text-dim);">${match.players[match.activeSide].name}'s turn</span>
-          <div class="prize-pips" title="Your prizes remaining">
-            ${Array.from({length:PRIZES},(_,i)=>`<span class="prize-pip ${i<(PRIZES-self.prizesRemaining)?'taken':''}"></span>`).join('')}
+          <div class="prize-pips" title="Opponent's prizes remaining">
+            ${Array.from({length:PRIZES},(_,i)=>`<span class="prize-pip ${i<(PRIZES-opp.prizesRemaining)?'taken':''}"></span>`).join('')}
           </div>
         </div>
 
-        <div style="text-align:center;font-size:10.5px;color:var(--text-faint);font-family:var(--font-mono);padding:2px 0;">
-          ${UI.escapeHtml(opp.name)} — Deck ${opp.deck.length} · Hand ${opp.hand.length} · Prizes ${opp.prizesRemaining}
+        <div class="opp-hand-strip">
+          <div class="opp-hand-fan" id="opp-hand-fan"></div>
+          <div class="opp-stat-line">${UI.escapeHtml(opp.name)} — Deck ${opp.deck.length} · Hand ${opp.hand.length} · Prizes ${opp.prizesRemaining}</div>
         </div>
 
-        ${match.stadium ? renderStadiumBar() : ''}
+        <div class="battle-row">
+          <div class="zone-col outer-col">
+            <div class="pile-box" id="opp-draw-pile" title="Opponent Draw Pile"><span class="pile-ic">🂠</span><span class="pile-label">Draw</span><span class="pile-count">${opp.deck.length}</span></div>
+            <div class="pile-box discard" id="opp-discard-pile" title="Opponent Discard Pile — tap to view"><span class="pile-ic">🗑</span><span class="pile-label">Discard</span><span class="pile-count">${opp.discard.length}</span></div>
+          </div>
 
-        <div class="field-zones">
-          <div class="side-zones">
+          <div class="zone-col bench-col">
             <div class="side-label">Opponent Bench</div>
             <div class="bench-row" id="opp-bench"></div>
           </div>
-          <div class="active-zone">
+
+          <div class="zone-col prize-col">
+            <div class="side-label">Your Prizes</div>
+            <div class="prize-stack" id="prize-stack"></div>
+          </div>
+
+          <div class="zone-col active-col">
             <div class="slot active-slot" id="opp-active"></div>
             <div class="vs-divider">VS</div>
             <div class="slot active-slot" id="self-active"></div>
           </div>
-          <div class="side-zones">
+
+          <div class="zone-col stadium-col">
+            <div class="side-label">Stadium</div>
+            <div class="stadium-box" id="stadium-box"></div>
+          </div>
+
+          <div class="zone-col bench-col">
             <div class="side-label">Your Bench</div>
             <div class="bench-row" id="self-bench"></div>
           </div>
-        </div>
 
-        <div class="hand-row" id="self-hand"></div>
+          <div class="zone-col outer-col">
+            <div class="pile-box" id="self-draw-pile" title="Your Draw Pile"><span class="pile-ic">🂠</span><span class="pile-label">Draw</span><span class="pile-count">${self.deck.length}</span></div>
+            <div class="pile-box discard" id="self-discard-pile" title="Your Discard Pile — tap to view"><span class="pile-ic">🗑</span><span class="pile-label">Discard</span><span class="pile-count">${self.discard.length}</span></div>
+          </div>
+        </div>
 
         <div class="match-actions" id="match-actions"></div>
         ${selectedHandCard ? `<div class="match-hint" id="match-hint"></div>` : ''}
         <div class="match-log" id="match-log">${match.log.slice(-5).map(m=>`<div>${UI.escapeHtml(m)}</div>`).join('')}</div>
 
         ${match.winner ? `<div class="alert-banner ${match.winner==='self'?'success':'error'}" style="text-align:center;font-size:15px;font-weight:700;">${match.winner==='self'?'🏆 You win!':'💀 Opponent wins'}</div>` : ''}
+
+        <div class="hand-strip">
+          <div class="hand-row" id="self-hand"></div>
+        </div>
       </div>`;
 
+    renderOppHandFan(opp);
     renderSlot('opp-active', opp.active, false);
     renderSlot('self-active', self.active, true);
     renderBench('opp-bench', opp.bench, false);
     renderBench('self-bench', self.bench, true);
+    renderPrizeStack(self);
+    renderStadiumBox();
     renderHand(self, myTurn);
     renderActions(self, myTurn);
+    document.getElementById('opp-discard-pile').onclick = () => showDiscardDialog(opp);
+    document.getElementById('self-discard-pile').onclick = () => showDiscardDialog(self);
     const log=container.querySelector('#match-log');
     if(log) log.scrollTop=log.scrollHeight;
   }
 
-  function renderStadiumBar(){
+  function renderOppHandFan(opp){
+    const el = document.getElementById('opp-hand-fan'); if(!el) return;
+    el.innerHTML = '';
+    const count = Math.min(opp.hand.length, 10);
+    for(let i=0;i<count;i++){
+      const back = document.createElement('div');
+      back.className = 'card-back-mini';
+      el.appendChild(back);
+    }
+  }
+
+  function renderPrizeStack(self){
+    const el = document.getElementById('prize-stack'); if(!el) return;
+    el.innerHTML = '';
+    for(let i=0;i<PRIZES;i++){
+      const c = document.createElement('div');
+      c.className = 'prize-card-mini' + (i < (PRIZES-self.prizesRemaining) ? ' taken' : '');
+      el.appendChild(c);
+    }
+  }
+
+  function renderStadiumBox(){
+    const el = document.getElementById('stadium-box'); if(!el) return;
+    if(!match.stadium){ el.className = 'stadium-box empty'; el.innerHTML = '<span class="stadium-ic">⛩</span>'; return; }
     const card = Binder._getMeta(match.stadium);
-    if(!card) return '';
-    return `<div class="stadium-bar"><span class="stadium-ic">⛩</span> Stadium in play: <b>${UI.escapeHtml(card.name)}</b></div>`;
+    el.className = 'stadium-box filled';
+    el.innerHTML = card ? `<img src="${UI.escapeHtml(UI.cardImg(card))}" alt="${UI.escapeHtml(card.name)}" onerror="this.style.opacity=0.1" title="${UI.escapeHtml(card.name)}">` : '';
+  }
+
+  async function showDiscardDialog(player){
+    if(!player.discard.length){ UI.toast('Discard pile is empty.', 'info', 1600); return; }
+    const counts = {};
+    player.discard.forEach(id => {
+      const card = Binder._getMeta(id);
+      const name = card ? card.name : id;
+      counts[name] = (counts[name]||0) + 1;
+    });
+    const body = document.createElement('div');
+    body.style.cssText = 'max-height:320px; overflow-y:auto; font-size:13px; color:var(--text-dim); line-height:2;';
+    body.innerHTML = Object.entries(counts).map(([name,qty]) => `<div>${UI.escapeHtml(name)} <span class="text-faint">×${qty}</span></div>`).join('');
+    await UI.dialog({ title:`${player.name}'s Discard Pile (${player.discard.length})`, body, actions:[{label:'Close',variant:'primary',value:true}] });
   }
 
   function renderSlot(id, slot, mine){
