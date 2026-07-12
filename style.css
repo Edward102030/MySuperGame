@@ -532,12 +532,53 @@ img { display: block; }
 .prize-pip.taken { background: var(--surface-3); }
 .turn-indicator { color: var(--accent); font-weight: 700; font-size: 11px; }
 
-.field-zones { display: flex; justify-content: space-around; align-items: center; padding: 10px 0; flex: 1; }
-.side-zones { display: flex; flex-direction: column; gap: 10px; align-items: center; flex: 1; }
-.side-label { font-size: 10px; color: var(--text-faint); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+/* ---- Opponent hand strip (top) ---- */
+.opp-hand-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; }
+.opp-hand-fan { display: flex; gap: -8px; }
+.card-back-mini {
+  width: 20px; height: 28px; margin-left: -8px; border-radius: 3px;
+  background: linear-gradient(145deg, var(--surface-3), var(--surface-2)); border: 1px solid var(--border);
+}
+.card-back-mini:first-child { margin-left: 0; }
+.opp-stat-line { font-size: 10px; color: var(--text-faint); font-family: var(--font-mono); }
+
+/* ---- Central battle row: piles / bench / prizes / active / stadium / bench / piles ---- */
+.battle-row { display: flex; align-items: flex-end; justify-content: center; gap: 10px; flex: 1; overflow-x: auto; padding: 6px 4px; -webkit-overflow-scrolling: touch; }
+.zone-col { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.side-label { font-size: 9.5px; color: var(--text-faint); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+
+.outer-col { gap: 8px; }
+.pile-box {
+  width: 50px; height: 68px; border-radius: 6px; border: 1.5px dashed var(--border);
+  background: var(--surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  position: relative;
+}
+.pile-box.discard { cursor: pointer; border-style: solid; transition: border-color var(--dur-fast); }
+.pile-box.discard:hover { border-color: var(--accent); }
+.pile-ic { font-size: 14px; opacity: .7; }
+.pile-label { font-size: 8px; color: var(--text-faint); font-family: var(--font-mono); text-transform: uppercase; }
+.pile-count { font-size: 11px; font-weight: 700; font-family: var(--font-mono); color: var(--text-dim); }
+
+.bench-col { }
 .bench-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
-.active-zone { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 0 0 120px; }
-.vs-divider { font-family: var(--font-display); font-size: 20px; color: var(--text-faint); padding: 0 12px; }
+.prize-col { }
+.prize-stack { display: grid; grid-template-columns: repeat(2, 16px); grid-auto-rows: 22px; gap: 3px; }
+.prize-card-mini { background: var(--accent); border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.4); transition: background var(--dur-base); }
+.prize-card-mini.taken { background: var(--surface-3); box-shadow: none; }
+
+.active-col { flex: 0 0 auto; }
+.vs-divider { font-family: var(--font-display); font-size: 18px; color: var(--text-faint); }
+
+.stadium-col { }
+.stadium-box {
+  width: 56px; height: 78px; border-radius: 6px; border: 1.5px dashed var(--border); background: var(--surface);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.stadium-box.filled { border-style: solid; border-color: var(--accent-dim); }
+.stadium-box img { width: 100%; height: 100%; object-fit: cover; }
+.stadium-box .stadium-ic { font-size: 20px; opacity: .4; }
+
+.hand-strip { padding-top: 2px; }
 
 .slot {
   width: 64px; height: 89px; border-radius: 8px; border: 1.5px dashed var(--border);
